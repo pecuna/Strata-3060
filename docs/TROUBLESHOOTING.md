@@ -67,7 +67,10 @@ for `MADV_HUGEPAGE` on top (a fragmented machine spent minutes compacting memory
 that request on any setting.
 
 **Setup says the engine does not match GitHub's checksum.**
-Setup checks the downloaded ready-made engine against the SHA-256 GitHub publishes. On a mismatch the file is corrupt or was changed on the way, so setup deletes it and stops; run setup again to download it afresh. If GitHub gives no checksum (offline, rate limited, your own mirror), setup warns and installs anyway. `STRATA_SKIP_SHA256=1` skips the check, only if you insist.
+Setup checks downloaded engines against a trusted SHA256. A mismatch or unavailable checksum refuses installation;
+a refused update keeps the installed engine. Local archives and mirrors need an independently obtained
+`STRATA_ENGINE_SHA256` (64 hexadecimal characters). `STRATA_SKIP_SHA256=1` cannot bypass verification in this fork.
+See [the fork security policy](FORK_SECURITY.md); never derive an expected hash from an untrusted download.
 
 ## While it answers
 

@@ -171,12 +171,11 @@ LLAMA_CPP_ZIP = f"https://github.com/ggml-org/llama.cpp/archive/{LLAMA_CPP_COMMI
 # "https://github.com/<you>/Strata/releases/latest/download/" (or pass --prebuilt / set STRATA_PREBUILT_URL).
 # With the default, the release of this checkout's own version (PREBUILT_TAG_URL, CMakeLists.txt's version) is
 # tried first and the latest release is the fallback (#214): an older checkout keeps the engine it shipped with.
-PREBUILT_URL = "https://github.com/Niko1221/Strata/releases/latest/download/"
-# The repository the release assets and their SHA-256 come from; `engine_digest` reads the API here even
-# when --prebuilt points the download somewhere else, because the hash is only worth having if it comes
-# from somewhere the download does not.
-REPO = "Niko1221/Strata"
-PREBUILT_TAG_URL = "https://github.com/Niko1221/Strata/releases/download/v{version}/"
+PREBUILT_URL = "https://github.com/pecuna/Strata-3060/releases/latest/download/"
+# The default assets belong to the owner fork; never fall back to upstream engines.
+# Explicit GitHub --prebuilt URLs obtain their digest from that URL's repository.
+REPO = "pecuna/Strata-3060"
+PREBUILT_TAG_URL = "https://github.com/pecuna/Strata-3060/releases/download/v{version}/"
 PREBUILT_ASSET = "strata-windows-x64.zip" if WIN else "strata-linux-x64.zip"
 # the CUDA libraries the ready-made engine loads (the same CUDA 13.0 it is built with), from NVIDIA's pip packages
 CUDA_WHEELS = ["nvidia-cublas==13.0.2.14", "nvidia-cuda-runtime==13.0.96"]
@@ -1476,11 +1475,6 @@ def download(url, dst: Path, what=None):
             total = int(urllib.request.urlopen(req, timeout=60).headers.get("Content-Length", 0))
             break
         except urllib.error.HTTPError as e:
-            if e.code == 404 and hf_unpinned(url) != url:  # #214: the pinned revision is gone from the repository
-                warn(f"{what or dst.name}: not at the pinned revision any more; downloading the repository's "
-                     "current file")
-                url = hf_unpinned(url)
-                continue
             if attempt == 4:
                 fail(f"cannot reach {url.split('/')[2]} ({e})",
                      "check your internet connection and run it again" + source_hint(url))
@@ -1533,7 +1527,8 @@ def download(url, dst: Path, what=None):
         verify_sha256(dst, meta[0], meta[1])           # ModelScope's published hash; kept in the finish mark
     else:
         if ms is not None:
-            warn(f"{what or dst.name}: ModelScope publishes no SHA-256 for it: the file is not verified")
+            drop_archive(dst)
+            fail(f"{what or dst.name}: ModelScope publishes no SHA-256; refusing an unverified download")
         mark(dst)
     ok(f"{what or dst.name} downloaded")
 
@@ -2749,10 +2744,8 @@ def release_of(base: str) -> tuple[str, str | None] | None:
 def is_local(base: str) -> bool:
     """True for a path on this machine - `C:/mirror`, `/mnt/mirror`, `//share/engine`, `file://...`.
 
-    A local folder is the user's own file on their own disk, the same trust decision as `--gguf-dir`, and
-    there is no published digest for it to be checked against.  It is treated differently from a remote
-    mirror on purpose: nothing is between the file and setup, whereas a remote mirror has a network in the
-    middle and still no release to check it against.
+    A local path still needs a trusted digest supplied via STRATA_ENGINE_SHA256;
+    this helper only classifies paths, it does not confer trust or bypass verification.
     """
     b = base.strip()
     if b.lower().startswith("file://"):
@@ -2761,15 +2754,10 @@ def is_local(base: str) -> bool:
 
 
 def engine_digest(asset: str, base: str) -> tuple[int, str] | None:
-    """(size, "sha256:<hex>") for `asset` in the release `base` points at, or None if GitHub will not say.
+    """(size, 64-character SHA-256 hex) for this release asset, or None if unavailable.
 
-    The size and hash come from the releases API - a different origin from the download, which is the
-    whole point: a mirrored, substituted or TLS-intercepted download does not come with a matching digest,
-    while a compromised release does (see `verify_engine_archive` for what that leaves uncovered).
-
-    GitHub populates `digest` for every asset, including ones uploaded before the field existed
-    (measured on v0.1.34 through v0.1.40.1).  None means no answer - no network, a rate limit, or a
-    release that does not publish one - and the caller warns and installs anyway (never refuses).
+    Missing or malformed digests are not trusted. The caller refuses them unless an
+    explicit STRATA_ENGINE_SHA256 owner pin is supplied; local paths never query GitHub.
     """
     where = release_of(base)
     if where is None:                  # a local folder or a plain mirror: nothing published to check against
@@ -2784,8 +2772,10 @@ def engine_digest(asset: str, base: str) -> tuple[int, str] | None:
     except Exception:
         return None                     # offline, rate-limited, or the release is not there
     for a in rel.get("assets") or []:
-        if a.get("name") == asset and a.get("digest") and str(a.get("digest")).startswith("sha256:"):
-            return int(a.get("size") or 0), str(a["digest"]).split(":", 1)[1]
+        digest = a.get("digest")
+        if a.get("name") == asset and isinstance(digest, str) and \
+                re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
+            return int(a.get("size") or 0), digest.split(":", 1)[1].lower()
     return None
 
 
@@ -2796,50 +2786,29 @@ def drop_download(z: Path) -> None:
 
 
 def verify_engine_archive(z: Path, asset: str, base: str) -> None:
-    """The downloaded engine archive against the published size and SHA-256, before it is unpacked.
+    """Verify before unpacking against a GitHub release digest or an explicit owner pin.
 
-    Without this, a ready-made engine is installed on nothing more than the byte count matching the
-    server's Content-Length - and a substituted file of the same length passes that.  It runs before the
-    archive is opened, so a wrong engine never reaches `_unpack`, let alone the engine directory.
-
-    Raises UnverifiedEngine on a refusal; the caller decides whether that stops setup (a first install,
-    with nothing to fall back to) or keeps the engine that is already there (an update).
-
-    Where the hash comes from, and where it cannot:
-
-    - a GitHub release URL: the tag is read out of the URL, so the exact release the bytes claim to come
-      from is the one checked rather than "latest" (setup tries the checkout's own release first, #214),
-      and the repository comes out of the URL too, so a fork's releases are checked against the fork;
-    - a local folder (`--prebuilt D:/mirror`): nothing published to check against.  This warns and goes
-      ahead - it is the user's own file, the same trust decision as `--gguf-dir`, and there is nothing an
-      API could say about it;
-    - any other remote mirror: nothing published to check against either, but a network is in the middle,
-      so it warns and installs anyway (no digest is never a reason to refuse).
-
-    What a digest from the API does NOT cover, stated plainly: it proves the bytes are the ones GitHub
-    published for that asset, so it catches a corrupted transfer, a mirror or proxy that substituted the
-    file, and a hostile network.  It does not make a malicious RELEASE safe - if whoever can publish a
-    release publishes a hostile engine, the digest matches it.  Only a hash pinned in this file closes
-    that, at the cost of a commit per release; a dict of tag -> sha next to `engine_digest` is where one
-    would go.
-
-    The size and the hashing below are spelled out rather than delegated to `verify_sha256`, for two
-    reasons, both measured here.  That function ends in `fail()`, and a refusal has to be an Exception so
-    the update paths can fall back.  And it keeps a `.done` mark so 111 GB of Unsloth shards is hashed
-    once; the engine archive is 190 MB, which hashes in 0.79 s at 242 MB/s on this machine, against 3.0 s
-    to download the same file.  A mark that saves 0.8 s is not worth a class of hole - anything that
-    changes the file after it was verified, at any length - so there is no mark here.
+    STRATA_ENGINE_SHA256 takes exactly 64 hexadecimal characters and overrides the API
+    lookup, including for local archives and mirrors. Obtain it over a trusted channel.
+    Otherwise a GitHub release URL uses that repository and exact tag (or latest).
+    Missing metadata, size mismatches and wrong hashes refuse installation and remove
+    the downloaded archive and its finish mark. No skip environment variable bypasses
+    this check. A release digest establishes byte identity, not publisher safety.
+    Engine archives are always rehashed; model-sized .done hash caches are not used.
+    Raises UnverifiedEngine so an explicit update can preserve the installed engine.
     """
-    if os.environ.get("STRATA_SKIP_SHA256") == "1":
-        warn(f"STRATA_SKIP_SHA256=1: NOT checking {asset} against its SHA-256. If the file is corrupt or "
-             f"tampered with, it will be installed anyway. Unset it to get the check back.")
-        return
-    want = engine_digest(asset, base)          # one API call: this is a rate-limited API
+    owner_sha = os.environ.get("STRATA_ENGINE_SHA256")
+    if owner_sha is not None and re.fullmatch(r"[0-9a-fA-F]{64}", owner_sha) is None:
+        drop_download(z)
+        raise UnverifiedEngine("STRATA_ENGINE_SHA256 must be exactly 64 hexadecimal characters")
+    if not z.is_file():
+        drop_download(z)
+        raise UnverifiedEngine(f"engine archive not found: {z}")
+    want = (z.stat().st_size, owner_sha.lower()) if owner_sha is not None else engine_digest(asset, base)
     if not want:
-        # no published digest (offline, rate limit, a mirror or folder): install anyway, never refuse
-        warn(f"could not get a SHA-256 for {asset} from GitHub (offline, rate limited, or not a release "
-             f"URL), so it was NOT verified. Installing it as it is.")
-        return
+        drop_download(z)
+        raise UnverifiedEngine(f"no trusted SHA-256 is available for {asset}; "
+                               "refusing to install an unverified engine")
     size, sha = want
     have = z.stat().st_size if z.exists() else -1
     if have != size:
@@ -2856,7 +2825,8 @@ def verify_engine_archive(z: Path, asset: str, base: str) -> None:
         got = h.hexdigest()
         drop_download(z)
         raise UnverifiedEngine(f"{z.name} has the wrong SHA-256 ({got}, expected {sha})")
-    ok(f"{z.name}: SHA-256 checksum verified against GitHub's ({sha[:12]}...)")
+    source = "owner pin (STRATA_ENGINE_SHA256)" if owner_sha is not None else "GitHub release digest"
+    ok(f"{z.name}: SHA-256 checksum verified against {source} ({sha[:12]}...)")
 
 
 def engine_refused(asset: str, e: Exception, updating: bool) -> None:
@@ -2868,9 +2838,9 @@ def engine_refused(asset: str, e: Exception, updating: bool) -> None:
     catches what the download can throw.
     """
     if not updating:
-        fail(f"the downloaded Strata engine does not match GitHub's checksum: {e}",
-             "the bad download has been deleted (corrupt or tampered), so the next run fetches the "
-             "published file again. Set STRATA_SKIP_SHA256=1 only if you insist on installing it anyway")
+        fail(f"the downloaded Strata engine could not be verified: {e}",
+             "the refused archive was deleted; retry with valid release metadata, "
+             "or set STRATA_ENGINE_SHA256 to a trusted 64-character SHA-256 for your exact archive")
         return
     warn(f"keeping the engine that is installed: {e}")
     say("       Nothing was replaced. The bad download was deleted; run setup again to fetch it afresh.")
@@ -2983,7 +2953,8 @@ def get_prebuilt(url_base, gpu, vision, updating=False, toolkit=13) -> Path | No
             ok("ready-made engine already installed")
             return eng
         say(f"  Updating the ready-made engine ({meta.get('version')} -> {'.'.join(map(str, MIN_ENGINE))} or newer) ...")
-        info.replace(eng / "BUILD.json.prev")   # kept for the .previous copy
+        # Keep installed metadata in place until verified unpacked files are atomically installed.
+        # The atomic installer backs up the old metadata on a successful replacement.
     if not url_base:
         return None
     eng.mkdir(exist_ok=True)
@@ -3077,9 +3048,8 @@ def update_engine_gpu(toolkit=13):
 
 
 def update_installed_engine(url_base, toolkit=None) -> None:
-    """An installed ready-made engine older than MIN_ENGINE is replaced before the model starts, so a plain
-    START-HERE.bat on an existing install picks up a new release.  If that cannot happen (no internet, the model
-    still running, no ready-made engine for this GPU) the installed engine is kept and starts as before.
+    """Explicitly update an installed engine when the source/version changed.
+    Normal launcher starts do not call this function. A failed explicit update preserves the installed engine.
     toolkit None: engine/, then the experimental CUDA 12 engine in engine-cuda12/ when one is installed."""
     if toolkit is None:
         update_installed_engine(url_base, 13)
@@ -4609,13 +4579,16 @@ def desktop_reserve_note() -> list[str]:
 
 
 def mtp_corrupt(mtp: Path, env=None) -> bool:
-    """#327: True when the MTP tensors an install fetched are not the pinned checkpoint's (tools/mtp_fetch.py verify,
-    which hashes only files that changed since they last checked out).  A mirror that ignored range requests left the
-    shards' starts there instead, and the draft layer built from them accepted nothing - with no error anywhere."""
+    """True when the raw MTP tensors are absent or corrupt. Every tensor is rehashed against its pinned digest.
+    Unexpected verifier errors stop setup rather than certifying the installed runtime."""
     if not (mtp / "tensors").is_dir():
-        return False
+        return True                         # no raw tensors means this runtime cannot be verified
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "mtp_fetch.py"), "verify", "--out", str(mtp)], env=env,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if r.returncode not in (0, 3):
+        detail = r.stdout.strip()[-2000:] if isinstance(r.stdout, str) else ""
+        fail(f"MTP verification did not complete (exit {r.returncode}); refusing to reuse the runtime",
+             (detail + "\n" if detail else "") + "inspect the verifier error and rerun explicit setup; do not skip verification")
     return r.returncode == 3
 
 
@@ -4642,29 +4615,15 @@ def refresh_draft_vocab(rt: Path, choice: str = "cjk") -> None:
 
 
 def ensure_engine_for(cards, cfg_path: Path, cfg: dict, yes: bool) -> dict:
-    """The installed engine must have code for every card the model starts on: a card added later (--gpus with an
-    older or newer generation, #128) or a new GPU in the PC otherwise stops the start with 'no kernel image'.  Such a
-    card gets the engine compiled for all of them, before the start.  A Pascal / Volta card added to a model on the
-    CUDA 13 engine moves the model to the experimental CUDA 12 engine (CUDA 13 has no code for it)."""
+    """Check hardware compatibility without downloading, rebuilding or changing configuration on a normal start."""
     tk = config_toolkit(cfg)
     if tk == 13 and any(int(g["arch"]) < CUDA13_MIN_ARCH for g in cards):
-        return use_cuda12(cards, cfg_path, cfg, yes)
+        fail("the selected older GPU requires a CUDA 12 engine; ordinary starts do not migrate engines",
+             "run explicit setup with --setup --cuda 12 --build, then start again")
     missing = [g for g in cards if not (engine_runs_on(g) if tk == 13 else engine_runs_on(g, tk))]
-    if not missing:
-        return cfg
-    eng = engine_dir(tk)
-    info = eng / "BUILD.json"
-    meta = json.loads(info.read_text(encoding="utf-8"))
-    say()
-    say("  The installed engine has no code for " + ", ".join(f"{g['name']} (sm_{g['arch']})" for g in missing) +
-        ": it is compiled for " + ("these cards" if len(cards) > 1 else "it") + " now.")
-    main = gpu_info(cards[0]["index"])
-    archs = sorted({int(x) for x in meta.get("archs", [])} | {int(g["arch"]) for g in cards})
-    vision = meta.get("vision") or ("gpu" if (eng / VEXE).exists() else "none")
-    build_engine({**main, "archs": archs}, vision, yes, get_llama_cpp(), toolkit=tk)
-    dirs = json.loads(info.read_text(encoding="utf-8")).get("cuda_dirs") or []
-    cfg["lib_dirs"] = dirs + [d for d in cfg.get("lib_dirs") or [] if d not in dirs]
-    write_config(cfg_path, cfg)
+    if missing:
+        fail("the installed engine has no code for " + ", ".join(f"{g['name']} (sm_{g['arch']})" for g in missing),
+             "run explicit setup with --setup --build for the selected GPUs, then start again")
     return cfg
 
 
@@ -4956,8 +4915,6 @@ def main() -> int:
     run_gpu = start_gpus(a.gpus) or a.gpu
     port = a.port or 8080                              # a new install's port (issue #32: --port for an existing one)
     if have and a.calibrate and not (a.setup or a.model or a.family or a.check):
-        if not a.build:
-            update_installed_engine(a.prebuilt)
         pick_cfg = have[0]
         if len(have) > 1:
             say()
@@ -4972,8 +4929,7 @@ def main() -> int:
                      keep={"host": a.host, "api_key": a.api_key, "draft_vocab": a.draft_vocab,
                            "vram_reserve_mib": a.vram_reserve_mib, "open_browser": a.browser})
     if have and not (a.setup or a.model or a.family or a.check or a.no_start):
-        if not a.build:
-            update_installed_engine(a.prebuilt)
+        # A launch uses the installed engine. Only explicit --update may replace it.
         if len(have) == 1:
             return start(have[0], a.port, run_gpu, yes=a.yes, layer_split=a.layer_split,
                      keep={"host": a.host, "api_key": a.api_key, "draft_vocab": a.draft_vocab,

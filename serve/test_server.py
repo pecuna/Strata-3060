@@ -372,24 +372,25 @@ class ImageMarkers(unittest.TestCase):
                     self.assertIn(note, tok.decode(ids))
                     if svc.embeddings.path:
                         svc.embeddings.path.unlink(missing_ok=True)
-            # a tool's picture at a URL is downloaded once (the check and the prompt share the bytes), and one that
-            # cannot be fetched is a note too
-            import serve.server as server
-            url = {"type": "image", "source": {"type": "url", "url": "http://x/ok.png"}}
+            # Remote tool pictures are omitted without network or encoder access; local/base64 ones above stay.
             url_msgs = [{"role": "user", "content": "look"}, call,
-                        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": [url]}]}]
+                        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": []}]}]
+            vision = self.FakeVision(d)
             svc = Service(MockEngine(tok, "ok", max_context=CTX), tok, ChatTemplate(ROOT / "serve/chat_template.jinja"),
-                          vision=self.FakeVision(d))
-            m, _, _ = anthropic_to_messages({"messages": url_msgs})
-            with mock.patch.object(server.Vision, "download", return_value=b"the picture") as dl:
-                ids, _, _ = svc.prepare(m, None, {})
-            self.assertEqual((dl.call_count, ids.count(pad)), (1, 3))
-            svc.embeddings.path.unlink(missing_ok=True)
-            m, _, _ = anthropic_to_messages({"messages": url_msgs})
-            with mock.patch.object(server.Vision, "download", side_effect=ValueError("the image URL could not be read")):
-                ids, _, _ = svc.prepare(m, None, {})
-            self.assertEqual(ids.count(pad), 0)
-            self.assertIn("[image omitted: the image URL could not be read]", tok.decode(ids))
+                          vision=vision)
+            for url in ("http://x/ok.png", "HTTPS://x/ok.png", " \thttps://x/ok.png"):
+                with self.subTest(url=url):
+                    url_msgs[-1]["content"][0]["content"] = [{"type": "image", "source": {"type": "url", "url": url}}]
+                    m, _, _ = anthropic_to_messages({"messages": url_msgs})
+                    with mock.patch("urllib.request.urlopen") as dl, mock.patch.object(vision, "encode") as encode:
+                        encode.return_value = vision.rows, 3
+                        svc._note_unreadable_tool_images(m)
+                        self.assertEqual(m[-1]["content"][0]["type"], "text")
+                        ids, _, _ = svc.prepare(m, None, {})
+                        self.assertEqual(ids.count(pad), 0)
+                        self.assertIn("[image omitted: remote image URLs are disabled;", tok.decode(ids))
+                        dl.assert_not_called()
+                        encode.assert_not_called()
             svc = Service(MockEngine(tok, "ok", max_context=CTX), tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
             m, _, _ = anthropic_to_messages({"messages": [{"role": "user", "content": [good]}]})
             with self.assertRaises(ValueError):
@@ -4572,64 +4573,32 @@ class ImageSources(unittest.TestCase):
             with mock.patch.object(Path, "read_bytes", side_effect=PermissionError("denied")),                     self.assertRaisesRegex(ValueError, "could not be read from"):
                 Vision.load(str(f))
 
-    def test_a_url_is_read_up_to_the_cap(self):
-        import http.server
-        import serve.server as server
+    def test_remote_urls_are_refused_without_network_access(self):
+        from serve.server import Vision
+        with mock.patch("urllib.request.urlopen") as download:
+            for source in ("http://127.0.0.1/small", "https://example.com/big?length",
+                           "http://127.0.0.1/missing"):
+                with self.subTest(source=source), self.assertRaisesRegex(ValueError, "remote image URLs are disabled"):
+                    Vision.load(source)
+            download.assert_not_called()
 
-        class Files(http.server.BaseHTTPRequestHandler):
-            def log_message(self, *args):
-                pass
-
-            def do_GET(self):
-                body = {"/small": b"x" * 100, "/big": b"x" * 5000}.get(urllib.parse.urlsplit(self.path).path)
-                if body is None:
-                    self.send_error(404)
-                    return
-                self.send_response(200)
-                if "length" in self.path:                           # else the body ends when the connection does
-                    self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                try:
-                    self.wfile.write(body)
-                except OSError:                                     # the reader stopped at the cap
-                    pass
-
-        httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Files)
-        threading.Thread(target=httpd.serve_forever, daemon=True).start()
-        base = f"http://127.0.0.1:{httpd.server_address[1]}"
-        try:
-            with mock.patch.object(server, "IMAGE_URL_MAX", 1000):
-                for q in ("", "?length"):
-                    with self.subTest(q=q):
-                        self.assertEqual(server.Vision.load(base + "/small" + q), b"x" * 100)
-                        with self.assertRaisesRegex(ValueError, "is over"):
-                            server.Vision.load(base + "/big" + q)
-                with self.assertRaisesRegex(ValueError, "could not be read: HTTP Error 404"):
-                    server.Vision.load(base + "/missing")
-        finally:
-            httpd.shutdown()
-            httpd.server_close()
-
-    def test_a_url_is_downloaded_outside_the_fifo(self):
-        import serve.server as server
+    def test_remote_url_is_refused_before_waiting_for_the_fifo(self):
         tok = ByteTokenizer()
         with tempfile.TemporaryDirectory() as d:
             vision = self.Vision(d)
             svc = Service(MockEngine(tok, "ok", max_context=CTX), tok, ChatTemplate(ROOT / "serve/chat_template.jinja"),
                           vision=vision)
-            held = []
-
-            def download(url):
-                held.append(svc.fifo.locked())
-                return b"the picture"
-
             msgs = [{"role": "user", "content": [{"type": "image", "source": "https://example.com/x.png"},
                                                  {"type": "image", "source": "x.png"}]}]
-            with mock.patch.object(server.Vision, "download", side_effect=download):
-                svc.prepare(msgs, None, {})
-            self.assertEqual(held, [False])                         # not while every other request waits
-            self.assertEqual(vision.got, [b"the picture", "x.png"])
-            svc.embeddings.path.unlink(missing_ok=True)
+            svc.fifo.acquire()
+            try:
+                with mock.patch("urllib.request.urlopen") as download, \
+                        self.assertRaisesRegex(ValueError, "remote image URLs are disabled"):
+                    svc.prepare(msgs, None, {})
+                download.assert_not_called()
+                self.assertEqual(vision.got, [])
+            finally:
+                svc.fifo.release()
 
     def test_a_page_of_another_site_cannot_name_a_file(self):
         tok = ByteTokenizer()

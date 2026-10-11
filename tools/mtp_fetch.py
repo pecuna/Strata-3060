@@ -27,8 +27,8 @@ import urllib.error
 import urllib.request
 
 # #214: a fixed commit of the checkpoint (its `sha` from https://huggingface.co/api/models/Qwen/Qwen3.8-Flash-Next
-# on 2026-09-30), so every install reads the same tensors; STRATA_MTP_REVISION overrides it (e.g. main).  When the
-# repository no longer has it, the current files are read instead, with a message (resolve_repo).
+# on 2026-09-30), so every install reads the same tensors. STRATA_MTP_REVISION overrides the source revision,
+# not the trusted hashes. An unavailable revision is an error; it never falls back to current files.
 PINNED_REVISION = "de4b8e4d43b917e7706784d8bb445c9af86a3540"
 REVISION = os.environ.get("STRATA_MTP_REVISION") or PINNED_REVISION
 # #495: HF_ENDPOINT (a mirror, e.g. https://hf-mirror.com) serves the same revision; the SHA256 checks below still apply
@@ -144,8 +144,16 @@ def check_range(status, content_range, start, end):
 
 
 def pinned():
-    """The tensors' hashes are the pinned revision's: they apply when this run reads that revision."""
+    """Whether the selected source URL is the default (never a reason to skip hash checks)."""
     return REPO == PINNED
+
+
+def trusted_sha256(name):
+    """The built-in pinned digest is required, regardless of the download source."""
+    want = SHA256.get(name)
+    if not isinstance(want, str) or len(want) != 64 or any(c not in "0123456789abcdef" for c in want):
+        sys.exit("%s: no valid trusted pinned sha256; refusing MTP acquisition" % name)
+    return want
 
 
 def sha256_of(path):
@@ -157,19 +165,10 @@ def sha256_of(path):
 
 
 def resolve_repo():
-    """REPO, or the repository's current files when the pinned revision is gone from it (a 404 on its index)."""
-    global REPO
-    try:
-        req = urllib.request.Request(REPO + "model.safetensors.index.json", method="HEAD",
-                                     headers={"User-Agent": "strata-mtp-fetch"})
-        urllib.request.urlopen(req, timeout=120).close()
-    except urllib.error.HTTPError as e:
-        if e.code == 404 and "/resolve/main/" not in REPO:
-            print("the checkpoint's pinned revision %s is gone: reading its current files (main)" % REVISION,
-                  file=sys.stderr)
-            REPO = REPO.replace("/resolve/%s/" % REVISION, "/resolve/main/")
-    except OSError:
-        pass                                        # no answer: get() retries and reports it
+    """Check the selected repository without silently switching revisions."""
+    req = urllib.request.Request(REPO + "model.safetensors.index.json", method="HEAD",
+                                 headers={"User-Agent": "strata-mtp-fetch"})
+    urllib.request.urlopen(req, timeout=120).close()
     return REPO
 
 
@@ -183,6 +182,8 @@ def shard_header(shard):
 def inventory(out):
     index = json.loads(get(REPO + "model.safetensors.index.json"))["weight_map"]
     mtp = {k: v for k, v in index.items() if k.startswith("mtp.")}
+    for name in mtp:
+        trusted_sha256(name)
     rows, total = [], 0
     for shard in sorted(set(mtp.values())):
         base, header = shard_header(shard)
@@ -224,6 +225,8 @@ def fetch(out, only):
     # and a tensor fetched from there is not resumed - it is kept only when it is the pinned revision's (sha256).
     same = isinstance(inv, dict) and inv.get("repo") == REPO
     rows = inv["tensors"] if same else inventory(out)
+    # Preflight the entire inventory before touching any tensor or publishing a manifest.
+    expected = {r["name"]: trusted_sha256(r["name"]) for r in rows}
     os.makedirs(tdir, exist_ok=True)
     manifest = []
     chunk = 64 << 20
@@ -231,9 +234,9 @@ def fetch(out, only):
         if only and only not in r["name"]:
             continue
         path = os.path.join(tdir, r["name"] + ".bin")
-        want = SHA256.get(r["name"]) if pinned() else None
+        want = expected[r["name"]]
         if os.path.exists(path) and not same and (
-                want is None or os.path.getsize(path) != r["bytes"] or sha256_of(path) != want):
+                os.path.getsize(path) != r["bytes"] or sha256_of(path) != want):
             os.remove(path)
         for attempt in range(2):
             have = os.path.getsize(path) if os.path.exists(path) else 0
@@ -250,7 +253,7 @@ def fetch(out, only):
             if os.path.getsize(path) != r["bytes"]:
                 sys.exit("%s: size %d != %d" % (path, os.path.getsize(path), r["bytes"]))
             digest = sha256_of(path)
-            if want is None or digest == want:
+            if digest == want:
                 break
             os.remove(path)                         # wrong bytes (#327): the whole tensor again, once
             if attempt:
@@ -263,35 +266,17 @@ def fetch(out, only):
 
 
 def verify(out):
-    """#327: the fetched tensors against SHA256 -> the names that are missing or wrong.  [] when they are right, or
-    when there is nothing to check (no tensors/, or STRATA_MTP_REVISION names another revision).  A tensor's verdict
-    is kept in tensors/verified.json by size and mtime, so a later run hashes only what changed."""
+    """Hash every expected tensor against built-in pinned SHA256, independent of source and cached metadata.
+    Return missing/corrupt names. Size/mtime sidecars are not proof of tensor integrity."""
     tdir = os.path.join(out, "tensors")
-    if not pinned() or not os.path.isdir(tdir):
-        return []
-    stamp_path = os.path.join(tdir, "verified.json")
-    try:
-        with open(stamp_path, encoding="utf-8") as f:
-            stamps = json.load(f)
-    except (OSError, ValueError):
-        stamps = {}
-    bad, good = [], {}
-    for name, want in sorted(SHA256.items()):
+    if not os.path.isdir(tdir):
+        return sorted(SHA256)
+    bad = []
+    for name in sorted(SHA256):
+        want = trusted_sha256(name)
         path = os.path.join(tdir, name + ".bin")
-        if not os.path.exists(path):
+        if not os.path.isfile(path) or sha256_of(path) != want:
             bad.append(name)
-            continue
-        st = os.stat(path)
-        key = [st.st_size, st.st_mtime_ns, want]
-        if stamps.get(name) != key and sha256_of(path) != want:
-            bad.append(name)
-            continue
-        good[name] = key
-    try:
-        with open(stamp_path, "w", encoding="utf-8") as f:
-            json.dump(good, f, indent=1)
-    except OSError:
-        pass
     return bad
 
 

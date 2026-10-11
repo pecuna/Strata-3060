@@ -9,6 +9,10 @@ Work through the steps in order. Tell the user what you are doing in plain words
 
 ## 0. Ground rules
 
+- **Read [the fork security policy](FORK_SECURITY.md) first.** Use `pecuna/Strata-3060` source and fork binaries,
+  not upstream engine defaults. Do not skip hashes or substitute unpinned model/MTP revisions. Normal starts do
+  not update the engine; updates must be explicit. Remote image URLs are disabled; send base64 image bytes.
+
 - **Never expose the server without an API key.** Keep the default `--host 127.0.0.1`. Only if the user asks for
   access from other devices, use `--host 0.0.0.0` **together with** `--api-key <a long random secret>`, and give the
   user the key. Never put a tunnel or port forward in front of a server without a key.
@@ -57,10 +61,10 @@ If the PC does not meet them, say which part is missing and stop.
 ## 2. Get Strata
 
 ```
-git clone https://github.com/Niko1221/Strata.git
+git clone https://github.com/pecuna/Strata-3060.git Strata
 ```
 
-Without git: download https://github.com/Niko1221/Strata/archive/refs/heads/main.zip and unzip it. Pick a drive with
+Without git: download https://github.com/pecuna/Strata-3060/archive/refs/heads/main.zip and unzip it. Pick a drive with
 enough free space: the model files go to a `Strata-data` folder **next to** the Strata folder (or `--data-dir <path>`
 on another drive).
 

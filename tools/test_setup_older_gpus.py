@@ -241,10 +241,9 @@ class Install(unittest.TestCase):
 
 
 class Start(unittest.TestCase):
-    """At a start: a Pascal / Volta card added to a CUDA 13 model moves that model to the CUDA 12 engine; updates
-    look at both engine folders."""
+    """Ordinary starts refuse automatic CUDA migration; explicit updates inspect both engine folders."""
 
-    def test_an_old_card_added_moves_the_model(self):
+    def test_an_old_card_added_requires_explicit_setup(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             cfg_path = root / "strata-iq3_xxs.json"
@@ -254,14 +253,12 @@ class Start(unittest.TestCase):
                     mock.patch.object(setup, "get_prebuilt", fake_prebuilt(calls)), \
                     mock.patch.object(setup, "pip_cuda_libs", lambda tk=13: None), \
                     mock.patch.object(setup, "cuda_lib_dirs", lambda tk=13: [f"<cu{tk}>"]), \
-                    mock.patch.object(setup, "gpu_info", lambda i=None: None):
-                got, text = quiet(setup.ensure_engine_for, [card(0, "RTX 3090", 24.0, "86"), {**V100, "index": 1}],
-                                  cfg_path, dict(cfg), True)
-            self.assertEqual(calls, [12])
-            self.assertEqual(Path(got["exe"]).parent.name, "engine-cuda12")
-            self.assertEqual((got["cuda"], got["lib_dirs"]), (12, ["<cu12>"]))
-            self.assertIn("moves to the experimental CUDA 12 engine", text)
-            self.assertEqual(json.loads(cfg_path.read_text())["cuda"], 12)
+                    mock.patch.object(setup, "gpu_info", lambda i=None: None), self.assertRaises(SystemExit):
+                quiet(setup.ensure_engine_for, [card(0, "RTX 3090", 24.0, "86"), {**V100, "index": 1}],
+                      cfg_path, dict(cfg), True)
+            self.assertEqual(calls, [])
+            self.assertFalse(cfg_path.exists())
+            self.assertEqual(cfg["lib_dirs"], ["<cu13>"])
 
     def test_update_looks_at_both_engines(self):
         with tempfile.TemporaryDirectory() as d:

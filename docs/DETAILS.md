@@ -1485,7 +1485,8 @@ you> /image C:\Users\me\Pictures\receipt.jpg
 you> What is the total on this receipt?
 ```
 
-**OpenAI API** (an `image_url` part: a `data:` URL, an `http(s)://` URL or a local file path):
+**OpenAI API** (an `image_url` part: a base64 `data:` URL or a local file path on the server).
+This fork rejects HTTP(S) image URLs without fetching them; attach image bytes instead ([policy](FORK_SECURITY.md)):
 
 ```python
 import base64
@@ -1498,7 +1499,7 @@ r = client.chat.completions.create(model="strata", messages=[{"role": "user", "c
 print(r.choices[0].message.content)
 ```
 
-**Anthropic API:** an `image` block with a `base64` (or `url`) source, as usual.
+**Anthropic API:** use an `image` block with a `base64` source. HTTP(S) URL sources are rejected in this fork.
 
 JPEG, PNG, BMP, GIF, WebP, TIFF and AVIF work (the last ones are converted to PNG first; agents such as omp send
 WebP). Chat apps with image upload work the same way.

@@ -160,18 +160,18 @@ class Ranges(FetchCase):
         self.assertEqual(fetched, [("model-2.safetensors",) + Mirror.span("model-2.safetensors", "mtp.b")],
                          "mtp.a was right and is kept; mtp.b is fetched whole")
 
-    def test_verify_keeps_its_verdict_and_skips_other_revisions(self):
+    def test_verify_keeps_its_verdict_across_source_revisions(self):
         self.fetch(Mirror())
         self.assertEqual(M.verify(str(self.out)), [])
-        stamps = json.loads((self.out / "tensors" / "verified.json").read_text())
-        self.assertEqual(sorted(stamps), ["mtp.a", "mtp.b"])
-        with mock.patch.object(M, "sha256_of", side_effect=AssertionError("hashed an unchanged file")):
+        self.assertFalse((self.out / "tensors" / "verified.json").exists())
+        with mock.patch.object(M, "sha256_of", wraps=M.sha256_of) as hashed:
             self.assertEqual(M.verify(str(self.out)), [])
+            self.assertEqual(hashed.call_count, len(M.SHA256))
         with mock.patch.object(M, "REPO", "https://huggingface.co/Qwen/Qwen3.8-Flash-Next/resolve/main/"):
             (self.out / "tensors" / "mtp.a.bin").write_bytes(b"x")
-            self.assertEqual(M.verify(str(self.out)), [])          # STRATA_MTP_REVISION: other hashes
+            self.assertEqual(M.verify(str(self.out)), ["mtp.a"])    # pinned trust is independent of source
         self.assertEqual(M.verify(str(self.out)), ["mtp.a"])
-        self.assertEqual(M.verify(str(self.out / "nothing")), [])
+        self.assertEqual(M.verify(str(self.out / "nothing")), sorted(M.SHA256))
 
 
 class Pinned(unittest.TestCase):
@@ -188,9 +188,9 @@ class Setup(unittest.TestCase):
         import setup
         with tempfile.TemporaryDirectory() as d:
             mtp = Path(d)
-            self.assertFalse(setup.mtp_corrupt(mtp))              # no tensors kept: nothing to check
+            self.assertTrue(setup.mtp_corrupt(mtp))               # absent tensors are not verified
             (mtp / "tensors").mkdir()
-            for code, want in ((0, False), (3, True), (1, False)):
+            for code, want in ((0, False), (3, True)):
                 with self.subTest(code=code), mock.patch.object(
                         setup.subprocess, "run", return_value=mock.Mock(returncode=code)) as run:
                     self.assertEqual(setup.mtp_corrupt(mtp), want)

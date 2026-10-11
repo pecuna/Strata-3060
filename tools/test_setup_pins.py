@@ -65,24 +65,24 @@ class HuggingFacePins(unittest.TestCase):
                          "https://huggingface.co/ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF/resolve/main/x.gguf")
         self.assertEqual(setup.hf_unpinned("https://example.com/a/b"), "https://example.com/a/b")
 
-    def test_a_gone_revision_downloads_the_current_file(self):
+    def test_a_gone_revision_refuses_instead_of_downloading_main(self):
         seen = []
+        pinned = setup.FAMILIES["qwen"]["mmproj_hf"] + "m.gguf"
 
         def urlopen(req, timeout=None):
             seen.append((req.get_method(), req.full_url))
-            if "/resolve/main/" not in req.full_url:
-                raise not_found(req.full_url)
-            return Response(b"model bytes", status=200)
+            raise not_found(req.full_url)
 
-        # the pinned Hugging Face path itself (setup's --source huggingface; auto may pick ModelScope)
         with tempfile.TemporaryDirectory() as d, mock.patch.object(setup.urllib.request, "urlopen", urlopen), \
+                mock.patch.object(setup.time, "sleep"), \
                 mock.patch.dict(setup.os.environ, {"STRATA_SOURCE": "huggingface"}):
             dst = Path(d) / "m.gguf"
-            _, out = quiet(setup.download, setup.FAMILIES["qwen"]["mmproj_hf"] + "m.gguf", dst)
-            self.assertEqual(dst.read_bytes(), b"model bytes")
-        self.assertIn("not at the pinned revision any more", out)
-        self.assertEqual([m for m, _ in seen], ["HEAD", "HEAD", "GET"])
-        self.assertTrue(all("/resolve/main/" in u for _, u in seen[1:]))
+            with self.assertRaises(SystemExit):
+                quiet(setup.download, pinned, dst)
+            self.assertFalse(dst.exists())
+            self.assertFalse(dst.with_name(dst.name + ".done").exists())
+        self.assertTrue(seen)
+        self.assertTrue(all(method == "HEAD" and url == pinned for method, url in seen))
 
     def test_a_complete_part_is_finished_without_a_request(self):
         """A .part with every byte (setup stopped between the last byte and the rename): renamed, not resumed with a
@@ -104,7 +104,7 @@ class HuggingFacePins(unittest.TestCase):
             self.assertTrue(setup.done(dst))
         self.assertEqual(seen, [("HEAD", None)])
 
-    def test_mtp_fetch_is_pinned_and_falls_back(self):
+    def test_mtp_fetch_is_pinned_and_refuses_missing_revision(self):
         import mtp_fetch
         self.assertRegex(mtp_fetch.REPO, SHA)
         self.assertIn(mtp_fetch.REVISION, mtp_fetch.REPO)
@@ -114,10 +114,10 @@ class HuggingFacePins(unittest.TestCase):
             raise not_found(req.full_url)
 
         try:
-            with mock.patch.object(mtp_fetch.urllib.request, "urlopen", urlopen), \
-                    contextlib.redirect_stderr(io.StringIO()) as err:
-                self.assertEqual(mtp_fetch.resolve_repo(), "https://huggingface.co/Qwen/Qwen3.8-Flash-Next/resolve/main/")
-            self.assertIn("pinned revision", err.getvalue())
+            with mock.patch.object(mtp_fetch.urllib.request, "urlopen", urlopen):
+                with self.assertRaises(urllib.error.HTTPError):
+                    mtp_fetch.resolve_repo()
+            self.assertEqual(mtp_fetch.REPO, pinned)
         finally:
             mtp_fetch.REPO = pinned
 
@@ -165,6 +165,15 @@ class HuggingFacePins(unittest.TestCase):
 
 
 class Engine(unittest.TestCase):
+    def test_default_prebuilt_sources_are_only_the_owner_fork(self):
+        self.assertEqual(setup.REPO, "pecuna/Strata-3060")
+        self.assertEqual(setup.PREBUILT_URL,
+                         "https://github.com/pecuna/Strata-3060/releases/latest/download/")
+        self.assertEqual(setup.PREBUILT_TAG_URL,
+                         "https://github.com/pecuna/Strata-3060/releases/download/v{version}/")
+        self.assertTrue(all("github.com/pecuna/Strata-3060/" in url
+                            for url in setup.prebuilt_bases(setup.PREBUILT_URL)))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
@@ -219,11 +228,11 @@ class Engine(unittest.TestCase):
 
     def test_bases(self):
         self.assertEqual(setup.prebuilt_bases(setup.PREBUILT_URL),
-                         ["https://github.com/Niko1221/Strata/releases/download/v0.1.31/", setup.PREBUILT_URL])
+                         ["https://github.com/pecuna/Strata-3060/releases/download/v0.1.31/", setup.PREBUILT_URL])
         self.assertEqual(setup.prebuilt_bases("https://mirror.example/x"), ["https://mirror.example/x/"])
 
     def test_the_checkout_s_release_first(self):
-        tag = "https://github.com/Niko1221/Strata/releases/download/v0.1.31/"
+        tag = "https://github.com/pecuna/Strata-3060/releases/download/v0.1.31/"
         eng, out, heads, got = self.run_get([tag, setup.PREBUILT_URL])
         self.assertEqual(eng, self.root / "engine")
         self.assertEqual(got, [tag + setup.PREBUILT_ASSET])
@@ -265,12 +274,14 @@ class Engine(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:  # a --prebuilt folder, through the real download()
             asset = Path(folder) / setup.PREBUILT_ASSET
             asset.write_bytes(b"<html>not a zip</html>")
-            with self.assertRaises(zipfile.BadZipFile):
+            with mock.patch.dict(setup.os.environ, {"STRATA_ENGINE_SHA256": hashlib.sha256(asset.read_bytes()).hexdigest()}), \
+                    self.assertRaises(zipfile.BadZipFile):
                 quiet(setup.get_prebuilt, folder, {"arch": 89}, "gpu")
             with zipfile.ZipFile(asset, "w") as z:
                 z.writestr("BUILD.json", json.dumps({"version": ".".join(map(str, setup.MIN_ENGINE)), "archs": [89]}))
                 z.writestr(setup.EXE, b"engine")
-            eng, _ = quiet(setup.get_prebuilt, folder, {"arch": 89}, "gpu")
+            with mock.patch.dict(setup.os.environ, {"STRATA_ENGINE_SHA256": hashlib.sha256(asset.read_bytes()).hexdigest()}):
+                eng, _ = quiet(setup.get_prebuilt, folder, {"arch": 89}, "gpu")
         self.assertEqual(eng, self.root / "engine")
         self.assertEqual((self.root / "engine" / setup.EXE).read_bytes(), b"engine")
 

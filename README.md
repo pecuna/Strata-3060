@@ -11,7 +11,11 @@ NVIDIA or AMD graphics card (12 GB or more) · Windows or Linux · free and open
 
 Strata runs **[Qwen3.8-Flash-Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Next)** on a normal PC. This is a
 large, smart AI model that usually needs a server. It chats, writes code, reads pictures and works with your apps
-and coding agents. Nothing leaves your PC.
+and coding agents. Inference runs locally; configured MCP tools and installation/update operations can use the network.
+
+> **Strata-3060 fork policy:** remote image URLs are rejected, engine/MTP verification fails closed,
+> and ordinary starts do not update the engine. Read [the fork security policy](docs/FORK_SECURITY.md) before
+> installing or updating. This policy takes precedence over inherited upstream and translated instructions.
 
 ## How fast is it?
 
@@ -48,7 +52,7 @@ NVIDIA: Q2_0 with engine 0.1.36, the other rows with 0.1.26 (4K answers, 32K pro
 about 100-140 tokens per second. Long chats and other cards: [speed of each model](docs/MODELS.md#how-fast-is-each-size),
 [community results](docs/COMMUNITY_BENCHMARKS.md).
 
-<p align="center"><a href="https://buymeacoffee.com/strataengine"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a><br>
+<p align="center"><a href="https://buymeacoffee.com/strataengine">Support upstream Strata on Buy Me a Coffee</a><br>
 <sub>Strata is free. If it runs well on your PC, a coffee keeps the work on it going.</sub></p>
 
 ## What you need
@@ -78,7 +82,7 @@ The full list: [docs/INSTALL.md](docs/INSTALL.md#what-you-need).
 Do you use an AI coding assistant (Claude Code, Cursor, Codex, GitHub Copilot, ...)? Paste this into it:
 
 ```text
-Set up Strata on this PC for me: https://github.com/Niko1221/Strata - follow docs/AI_SETUP.md in that repository.
+Set up Strata on this PC for me: https://github.com/pecuna/Strata-3060 - follow docs/FORK_SECURITY.md and docs/AI_SETUP.md in that repository.
 ```
 
 It checks your graphics card, RAM and disk and picks the model that fits. Then it installs and starts it and tells
@@ -87,7 +91,7 @@ you how to connect your apps. AI tools can also install, start and stop Strata t
 
 ### Or do it yourself
 
-[Download Strata](https://github.com/Niko1221/Strata/archive/refs/heads/main.zip) and unzip it (or `git clone` it).
+[Download Strata](https://github.com/pecuna/Strata-3060/archive/refs/heads/main.zip) and unzip it (or `git clone` it).
 **Windows:** double-click **`START-HERE.bat`**. **Linux:** run **`./setup.sh`** in the Strata folder.
 
 The steps are the same for NVIDIA and AMD. The installer finds your card and sets up the right engine for it. It
@@ -211,4 +215,4 @@ parts and every model have their own licenses ([which ones](docs/HOW_IT_WORKS.md
 
 Strata is free and open source. If it is useful to you, you can support its development:
 
-<p align="center"><a href="https://buymeacoffee.com/strataengine"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a></p>
+<p align="center"><a href="https://buymeacoffee.com/strataengine">Support upstream Strata on Buy Me a Coffee</a></p>

@@ -347,6 +347,7 @@ class HipVision(unittest.TestCase):
                 (bdir / "bin" / setup.VEXE).write_bytes(b"vision")
 
             with mock.patch.object(setup, "ROOT", root), mock.patch.object(setup, "cmake_build", cmake_build), \
+                    mock.patch.object(setup, "cpu_info", return_value=("Test x86 CPU", True, False)), \
                     mock.patch.object(setup, "source_hash", lambda paths: vsrc if paths == setup.VISION_SOURCES else src):
                 quiet(setup.build_engine_hip, {"arch": "gfx1201"}, "llama", vision)
             return built, json.loads((eng / "BUILD.json").read_text()), (eng / setup.VEXE).exists()
@@ -542,7 +543,8 @@ class CudaVision(unittest.TestCase):
                 with mock.patch.object(setup, "ROOT", root), mock.patch.object(setup, "cmake_build", cmake_build), \
                         mock.patch.object(setup, "source_hash", lambda p: "V" if p == setup.VISION_SOURCES else "S"), \
                         mock.patch.object(setup, "install_build_tools", lambda gpu, yes: (str(root / "nvcc"), None)), \
-                        mock.patch.object(setup, "source_version", lambda: "test"):
+                        mock.patch.object(setup, "source_version", lambda: "test"), \
+                        mock.patch.object(setup, "cpu_info", return_value=("Test x86 CPU", True, False)):
                     quiet(setup.build_engine, {"arch": "86"}, vision, True, "llama")
                 self.assertEqual([t for t, _ in built], ["strata-vision"])
                 self.assertIn("-DSTRATA_PORTABLE=OFF", built[0][1])
@@ -605,7 +607,8 @@ class HostCompilers(unittest.TestCase):
                     mock.patch.object(setup, "cmake_build", cmake_build), \
                     mock.patch.object(setup, "source_hash", lambda p: "V" if p == setup.VISION_SOURCES else "new"), \
                     mock.patch.object(setup, "install_build_tools", lambda gpu, yes: (str(root / "nvcc"), None)), \
-                    mock.patch.object(setup, "source_version", lambda: "test"):
+                    mock.patch.object(setup, "source_version", lambda: "test"), \
+                    mock.patch.object(setup, "cpu_info", return_value=("Test x86 CPU", True, False)):
                 quiet(setup.build_engine, {"arch": "86"}, "gpu", True, "llama")
         for target, defs in built:
             self.assertIn("-DCMAKE_CXX_COMPILER=g++-14", defs, target)

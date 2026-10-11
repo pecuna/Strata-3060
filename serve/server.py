@@ -8,7 +8,7 @@ non-stream), GET /v1/models, GET /models, GET /props, GET /slots, GET /health, G
 Tools from MCP servers (serve/mcp.py, `"mcp_servers"` in the config or --mcp-config) are offered only to requests that
 ask for them with `"strata_mcp": true` - the web app does; other clients see exactly the API they always saw.
 Images (optional, when the config has a "vision" entry): OpenAI image_url parts and Anthropic image blocks (base64
-data, http(s) URLs or local file paths) go through `strata-vision` (the model's mmproj file) and reach the engine as
+data or local file paths; HTTP(S) URLs are rejected without fetching) go through `strata-vision` (the model's mmproj file) and reach the engine as
 embeddings (`GENI`).  JPEG/PNG/BMP/GIF go straight in; WebP, TIFF, AVIF, ... (agents like omp send WebP) are
 converted to PNG first with Pillow.
 Requests whose prompt plus max tokens exceed the engine's context are REJECTED with 400, never truncated.
@@ -2091,7 +2091,7 @@ class Vision:
                 return base64.b64decode(source.split(",", 1)[1])
             except (IndexError, ValueError) as e:                # no comma, or not base64
                 raise ValueError(f"the image's data: URL could not be read ({e})") from None
-        if source.startswith(("http://", "https://")):
+        if urlsplit(source).scheme in ("http", "https"):
             return Vision.download(source)
         path = source[7:] if source.startswith("file://") else source
         # refused before anything looks at the path: file://host/share/x.png is \\host\share\x.png ("file://C:/x.png",
@@ -2105,24 +2105,12 @@ class Vision:
                 return Path(path).read_bytes()
             except OSError as e:
                 raise ValueError(f"the image could not be read from {path} ({e})") from None
-        raise ValueError("an image must be a data: URL, an http(s) URL or a local file path")
+        raise ValueError("an image must be a base64 data: URL or a local file path")
 
     @staticmethod
     def download(url: str) -> bytes:
-        """An image URL's bytes, at most IMAGE_URL_MAX of them: the whole response was read, so a huge or endless one
-        filled the memory.  One that cannot be read is a ValueError (a 400 that says so), not a dropped connection."""
-        too_big = f"the image URL's file is over {IMAGE_URL_MAX >> 20} MiB"
-        try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "strata"}), timeout=60) as r:
-                size = r.headers.get("Content-Length") or ""
-                if size.isdigit() and int(size) > IMAGE_URL_MAX:
-                    raise ValueError(too_big)
-                data = r.read(IMAGE_URL_MAX + 1)
-        except (OSError, HTTPException) as e:
-            raise ValueError(f"the image URL could not be read: {e}") from None
-        if len(data) > IMAGE_URL_MAX:
-            raise ValueError(too_big)
-        return data
+        """Remote images are never fetched: no DNS, proxy, redirect or socket access."""
+        raise ValueError("remote image URLs are disabled; send a base64 data: URL or a local file path")
 
     @staticmethod
     def _exif_rotated(data: bytes) -> bool:
@@ -3446,7 +3434,7 @@ class Service:
                 if why is None:
                     src = item["source"]
                     try:
-                        if src.startswith(("http://", "https://")):
+                        if urlsplit(src).scheme in ("http", "https"):
                             src = fetched[item["source"]] = Vision.download(src)   # outside the FIFO, as in prepare()
                         with self.fifo:          # the encoder takes its turn with the requests (see below)
                             self.vision.encode(src)
@@ -3473,10 +3461,10 @@ class Service:
                                  "'vision'), so it cannot read images")
             pad = self.tok.encode(IMAGE_PAD, parse_special=True)[0]
             start = self.tok.encode(VISION_START, parse_special=True)[0]
-            # An image URL is downloaded first, outside the FIFO: under it, a slow server held every other request
-            # for as long as urlopen waited.
-            images = [fetched[src] if src in fetched else Vision.download(src) if src.startswith(("http://", "https://"))
-                      else src for src in images]
+            # Refuse remote sources before the encoder or its FIFO sees them.
+            for src in images:
+                if urlsplit(src).scheme in ("http", "https"):
+                    Vision.download(src)
             # Encode only while the engine is idle: the engine and the image encoder (a separate process) must not
             # run on the GPU at the same time - an encode during a running request left that request stuck at
             # "reading the prompt" with CPU and GPU busy, for good (reproduced).  So encoding takes its turn in the

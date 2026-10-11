@@ -150,7 +150,9 @@ class DigestLookup(unittest.TestCase):
         self.assertIsNone(setup.engine_digest(ASSET, TAG_BASE))
 
     def test_none_when_the_digest_is_not_a_sha256(self):
-        for other in ("md5:" + "d" * 32, "sha512:" + "e" * 128, "", None):
+        for other in ("md5:" + "d" * 32, "sha512:" + "e" * 128, "", None,
+                      "sha256:", "sha256:" + "a" * 63, "sha256:" + "g" * 64,
+                      "sha256:" + "a" * 64 + "\n"):
             self.asked(self.release_json("v0.1.40",
                                          [{"name": ASSET, "size": 42, "digest": other}]))
             self.assertIsNone(setup.engine_digest(ASSET, TAG_BASE), other)
@@ -192,9 +194,43 @@ class ArchiveVerification(unittest.TestCase):
         env = patch.start()
         self.addCleanup(patch.stop)
         env.pop("STRATA_SKIP_SHA256", None)
+        env.pop("STRATA_ENGINE_SHA256", None)
 
     def digest(self, value):
         return mock.patch.object(setup, "engine_digest", return_value=value)
+
+    def test_owner_sha256_verifies_local_and_mirror_without_the_api(self):
+        for base in (LOCAL_BASE, "https://mirror.invalid/dl/"):
+            with self.subTest(base=base), \
+                    mock.patch.dict(os.environ, {"STRATA_ENGINE_SHA256": sha_of(self.data)}), \
+                    mock.patch.object(setup, "engine_digest", side_effect=AssertionError("API lookup")):
+                setup.verify_engine_archive(self.z, ASSET, base)
+                self.assertTrue(self.z.exists())
+
+    def test_owner_sha256_rejects_malformed_values_before_lookup(self):
+        for value in ("", " " + sha_of(self.data), sha_of(self.data) + "\n", "sha256:" + sha_of(self.data),
+                      "g" * 64, "a" * 63, "a" * 65):
+            with self.subTest(value=repr(value)), \
+                    mock.patch.dict(os.environ, {"STRATA_ENGINE_SHA256": value}), \
+                    mock.patch.object(setup, "engine_digest", side_effect=AssertionError("API lookup")):
+                self.z.write_bytes(self.data)
+                with self.assertRaisesRegex(setup.UnverifiedEngine, "STRATA_ENGINE_SHA256.*64"):
+                    setup.verify_engine_archive(self.z, ASSET, LOCAL_BASE)
+                self.assertFalse(self.z.exists())
+
+    def test_missing_archive_is_a_verification_refusal(self):
+        self.z.unlink()
+        with mock.patch.dict(os.environ, {"STRATA_ENGINE_SHA256": sha_of(self.data)}):
+            with self.assertRaisesRegex(setup.UnverifiedEngine, "missing|not found"):
+                setup.verify_engine_archive(self.z, ASSET, LOCAL_BASE)
+
+    def test_owner_pin_reports_its_actual_provenance(self):
+        said = io.StringIO()
+        with mock.patch.dict(os.environ, {"STRATA_ENGINE_SHA256": sha_of(self.data)}), \
+                mock.patch.object(setup, "ok", said.write):
+            setup.verify_engine_archive(self.z, ASSET, LOCAL_BASE)
+        self.assertIn("STRATA_ENGINE_SHA256", said.getvalue())
+        self.assertNotIn("GitHub", said.getvalue())
 
     def test_passes_when_the_hash_matches(self):
         with self.digest((len(self.data), sha_of(self.data))):
@@ -226,24 +262,24 @@ class ArchiveVerification(unittest.TestCase):
                 setup.verify_engine_archive(self.z, ASSET, TAG_BASE)
         self.assertFalse(self.z.exists())
 
-    def test_no_digest_warns_and_installs_anyway(self):
-        # "recommend, never force": no digest (offline, rate limit, mirror, folder) is a warning, not a refusal.
+    def test_no_digest_refuses_and_deletes_the_download(self):
         for base in (TAG_BASE, LOCAL_BASE, "https://mirror.invalid/dl/"):
-            said = io.StringIO()
-            with self.digest(None), mock.patch.object(setup, "warn", said.write):
-                setup.verify_engine_archive(self.z, ASSET, base)     # must not raise
-            self.assertIn("NOT verified", said.getvalue(), base)
-            self.assertTrue(self.z.exists())
+            with self.subTest(base=base):
+                self.z.write_bytes(self.data)
+                setup.mark(self.z)
+                with self.digest(None), self.assertRaises(setup.UnverifiedEngine):
+                    setup.verify_engine_archive(self.z, ASSET, base)
+                self.assertFalse(self.z.exists())
+                self.assertFalse(self.z.with_name(self.z.name + ".done").exists())
 
-    def test_skip_env_skips_the_check_loudly(self):
+    def test_skip_env_cannot_bypass_verification(self):
         os.environ["STRATA_SKIP_SHA256"] = "1"
-        said = io.StringIO()
-        with mock.patch.object(setup, "engine_digest", return_value=(1, "0" * 64)) as m,                 mock.patch.object(setup, "warn", said.write):
-            setup.verify_engine_archive(self.z, ASSET, TAG_BASE)     # a wrong digest, but skipped
-        self.assertEqual(m.call_count, 0)
-        self.assertIn("STRATA_SKIP_SHA256", said.getvalue())
-        self.assertIn("NOT checking", said.getvalue())
-        self.assertTrue(self.z.exists())
+        for digest in (None, (len(self.data), "0" * 64)):
+            with self.subTest(digest=digest):
+                self.z.write_bytes(self.data)
+                with self.digest(digest), self.assertRaises(setup.UnverifiedEngine):
+                    setup.verify_engine_archive(self.z, ASSET, TAG_BASE)
+                self.assertFalse(self.z.exists())
 
     def test_skip_env_needs_exactly_1(self):
         os.environ["STRATA_SKIP_SHA256"] = "0"
@@ -295,6 +331,13 @@ class WhatARefusalDoesToTheCaller(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         (Path(self.tmp.name) / "engine").mkdir(parents=True, exist_ok=True)
+        (Path(self.tmp.name) / "CMakeLists.txt").write_text(f"project(strata VERSION {setup.source_version()})")
+        for patch in (mock.patch.object(setup, "ROOT", Path(self.tmp.name)),
+                      mock.patch.object(setup.urllib.request, "urlopen", return_value=mock.MagicMock()),
+                      mock.patch.dict(os.environ, {}, clear=False)):
+            patch.start()
+            self.addCleanup(patch.stop)
+        os.environ.pop("STRATA_ENGINE_SHA256", None)
 
     def fake_download(self, url, dst, what=None):
         with zipfile.ZipFile(dst, "w") as z:
@@ -326,6 +369,32 @@ class WhatARefusalDoesToTheCaller(unittest.TestCase):
         with mock.patch.object(setup, "download", self.fake_download),                 mock.patch.object(setup, "engine_digest", return_value=(999, "f" * 64)):
             with self.assertRaises(SystemExit):
                 setup.get_prebuilt(setup.PREBUILT_URL, {"arch": 89}, "gpu")
+
+    def test_refused_cuda_and_hip_updates_preserve_executable_and_metadata(self):
+        for backend in ("cuda", "hip"):
+            with self.subTest(backend=backend), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                eng = root / "engine"
+                eng.mkdir()
+                exe = eng / setup.EXE
+                exe.write_bytes(b"existing trusted engine")
+                metadata = eng / "BUILD.json"
+                metadata.write_text(json.dumps({"version": "0.1.1", "source": "prebuilt",
+                                                "backend": backend, "archs": [89] if backend == "cuda" else ["gfx1100"]}))
+                before = {p.name: p.read_bytes() for p in (exe, metadata)}
+                with mock.patch.object(setup, "ROOT", root), \
+                        mock.patch.object(setup, "download", self.fake_download), \
+                        mock.patch.object(setup, "engine_digest", return_value=None), \
+                        mock.patch.object(setup, "install_unpacked") as install, \
+                        contextlib_redirect(io.StringIO()):
+                    if backend == "cuda":
+                        result = setup.get_prebuilt(str(root / "pub"), {"arch": 89}, "gpu", updating=True)
+                    else:
+                        result = setup.get_prebuilt_hip(str(root / "pub"), {"arch": "gfx1100"}, updating=True)
+                self.assertIsNone(result)
+                install.assert_not_called()
+                self.assertTrue(metadata.is_file(), "a refused update removed installed BUILD.json")
+                self.assertEqual({p.name: p.read_bytes() for p in (exe, metadata)}, before)
 
     def test_the_cuda_and_amd_paths_both_verify(self):
         # get_prebuilt_hip downloads the AMD engine from a SECOND `download(base + ...)` call site, which

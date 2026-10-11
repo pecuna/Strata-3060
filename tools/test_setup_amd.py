@@ -6,6 +6,7 @@ which TheRock index each family installs from.  No GPU, no ROCm, no downloads.
 """
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -157,7 +158,7 @@ class GpuLists(unittest.TestCase):
         """build_engine_hip compiles for the set of the chosen cards' archs and records it in BUILD.json."""
         calls = {}
         saved = {k: getattr(setup, k) for k in ("ROOT", "rocm_root", "cmake_build", "source_hash", "source_version",
-                                                "ok", "shutil")}
+                                                "ok", "shutil", "cpu_info")}
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
 
@@ -171,6 +172,7 @@ class GpuLists(unittest.TestCase):
                 copy2 = staticmethod(lambda a, b: Path(b).write_text(Path(a).read_text()))
             setup.ROOT, setup.cmake_build, setup.ok, setup.shutil = root, fake_build, lambda *a: None, Sh
             setup.source_hash, setup.source_version = (lambda *a: "h"), (lambda: "0.1.31")
+            setup.cpu_info = lambda: ("Test x86 CPU", True, False)
             setup.rocm_root = lambda archs: (calls.setdefault("archs", archs) and root, [str(root / "lib")])
             try:
                 setup.build_engine_hip({"arch": "gfx1201", "archs": ["gfx1201", "gfx1100", "gfx1201"]}, root)
@@ -329,10 +331,13 @@ class WindowsDetection(unittest.TestCase):
                     z.writestr("strata-device.exe", "probe")
                     z.writestr("rocm/bin/amdhip64_7.dll", "dll")
                     z.writestr("BUILD.json", json.dumps(meta))
+                import hashlib
+                os.environ["STRATA_ENGINE_SHA256"] = hashlib.sha256((pub / setup.WIN_HIP_ASSET).read_bytes()).hexdigest()
             ver = ".".join(map(str, setup.WIN_HIP_MIN_ENGINE))
             good = {"source": "prebuilt", "backend": "hip", "version": ver, "archs": ["gfx1100", "gfx1201"],
                     "lib_dirs": ["rocm/bin"]}
             with mock.patch.object(setup, "ROOT", root), mock.patch.object(setup, "say", lambda *a, **k: None), \
+                    mock.patch.dict(os.environ, {}, clear=False), \
                     mock.patch.object(setup, "ok", lambda *a: None), mock.patch.object(setup, "warn", lambda *a: None):
                 publish({**good, "archs": ["gfx1100"]})
                 self.assertIsNone(setup.get_prebuilt_hip(str(pub) + "/", {"arch": "gfx1201"}))

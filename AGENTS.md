@@ -7,6 +7,10 @@ one-click installer (`setup.py`, started by `START-HERE.bat` / `setup.sh`).
 
 ## Installing Strata for a user
 
+This fork's [network and artifact security policy](docs/FORK_SECURITY.md) takes precedence over inherited
+upstream instructions. Do not restore remote image fetching, skip integrity checks, substitute upstream binaries,
+or update a managed production service merely to run setup. Source changes do not authorize deployment.
+
 Follow **[docs/AI_SETUP.md](docs/AI_SETUP.md)**: check the PC, pick the model by RAM, run setup non-interactively,
 start and verify the server, and connect the user's apps. Never expose the server beyond `127.0.0.1` without
 `--api-key`. As an alternative to shell commands, Strata's MCP server ([docs/MCP_SERVER.md](docs/MCP_SERVER.md))

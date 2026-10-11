@@ -119,10 +119,11 @@ class Download(Base):
         self.assertFalse(self.dst.exists())
         self.assertFalse(self.dst.with_name(self.dst.name + ".done").exists())
 
-    def test_no_hash_published(self):
-        setup.download(HF_URL, self.dst)              # no API file: the download is kept, as from Hugging Face
-        self.assertEqual(self.dst.read_bytes(), self.data)
-        self.assertTrue(self.dst.with_name(self.dst.name + ".done").exists())
+    def test_no_hash_published_is_refused(self):
+        with mock.patch.object(setup, "say"), self.assertRaises(SystemExit):
+            setup.download(HF_URL, self.dst)
+        self.assertFalse(self.dst.exists())
+        self.assertFalse(self.dst.with_name(self.dst.name + ".done").exists())
 
     def test_falls_back_when_modelscope_is_silent(self):
         calls = []
