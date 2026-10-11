@@ -2,6 +2,12 @@
 
 Source scope: security changes on top of `7695859aa13afb248bdb4d36f9b2e95707db079d` in `pecuna/Strata-3060`.
 Execution: Smith's local isolated Python test environment, not the deployed `llm.lan` service.
+This is the historical 2026-10-11 hardening record, not a continuously refreshed test/deployment status.
+Hardening commit: `960faa4e58e23d35143fa70fcd41f6f195549fb4`.
+
+For repeatable commands, invariant-to-test mapping and evidence required after every upstream import, see
+[Maintaining Strata-3060 across upstream releases](FORK_UPSTREAM_SYNC.md). Future runs must record their own
+exact source state, totals, skips and remaining limits; do not reuse the historical totals as a new result.
 
 ## Executed suites
 

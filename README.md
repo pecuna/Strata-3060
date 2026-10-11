@@ -16,6 +16,8 @@ and coding agents. Inference runs locally; configured MCP tools and installation
 > **Strata-3060 fork policy:** remote image URLs are rejected, engine/MTP verification fails closed,
 > and ordinary starts do not update the engine. Read [the fork security policy](docs/FORK_SECURITY.md) before
 > installing or updating. This policy takes precedence over inherited upstream and translated instructions.
+> Maintainers: follow [the upstream-sync and reapplication runbook](docs/FORK_UPSTREAM_SYNC.md) for every release
+> import; retain fork fixes and run the required regression checks before publishing.
 
 ## How fast is it?
 

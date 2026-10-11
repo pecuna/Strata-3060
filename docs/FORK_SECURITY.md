@@ -82,6 +82,11 @@ an offline machine. Avoid launching setup on a managed production service just t
 
 ## Regression verification
 
+For every upstream import, follow [the maintenance/reapplication runbook](FORK_UPSTREAM_SYNC.md). It records the
+complete change ledger, recovery baseline, conflict-handling procedure and mandatory release gates. Merge
+upstream improvements without discarding these guarantees; neither ancestry nor a clean merge proves safety.
+See [the historical verification record](FORK_SECURITY_TESTING.md) for executed checks and their limits.
+
 The security changes have GPU-free tests for remote image rejection before network access, unchanged local/base64
 image paths, engine archive verification refusal and mismatches, pinned acquisition policy, normal-start behavior,
 and fork acquisition routes. Tests use mocks/local fixtures rather than fetching production model artifacts.
