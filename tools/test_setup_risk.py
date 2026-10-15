@@ -197,7 +197,7 @@ class BrokenEarlierConfig(unittest.TestCase):
             setup.write_config(p, {"args": ["--kv", "int8"]})
             self.assertEqual(p.read_text(encoding="utf-8"), json.dumps({"args": ["--kv", "int8"]}, indent=1))
             self.assertEqual([f.name for f in Path(d).iterdir()], ["strata-iq3_s.json"])   # no .tmp left
-            with mock.patch.object(Path, "write_text", side_effect=OSError(28, "No space left on device")):
+            with mock.patch.object(setup.tempfile, "mkstemp", side_effect=OSError(28, "No space left on device")):
                 with self.assertRaises(OSError):
                     setup.write_config(p, {"args": []})
             self.assertEqual(json.loads(p.read_text(encoding="utf-8")), {"args": ["--kv", "int8"]})   # kept whole

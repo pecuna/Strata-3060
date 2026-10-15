@@ -17,6 +17,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,13 +50,14 @@ class FakeGGUF:
         self.tensors = [types.SimpleNamespace(name=n) for n in names]
 
 
-def normalize(v, t: Path):
+def normalize(v: Any, t: Path) -> Any:
     """The config with the temp folder and the platform's names taken out (it compares on Windows and Linux)."""
     if isinstance(v, dict):
         return {k: normalize(x, t) for k, x in v.items()}
     if isinstance(v, list):
         return [normalize(x, t) for x in v]
     if isinstance(v, str):
+        v = re.sub(r"(?<![\w.-])strata-vision(?:\.exe)?(?![\w.-])", "<VEXE>", v)
         return re.sub(rf"(?<![w.-]){re.escape(setup.EXE)}(?![w.-])", "<EXE>", v.replace(str(t), "<T>").replace("\\", "/"))   # #973: only the whole name, not "strata-x.log" on Linux
     return v
 
@@ -161,7 +163,7 @@ class Golden(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
+        cls.golden = normalize(json.loads(GOLDEN.read_text(encoding="utf-8")), Path("<T>"))
 
     def cases(self):
         for prof, (ram, found) in PROFILES.items():

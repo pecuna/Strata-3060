@@ -157,6 +157,31 @@ Regression owner: `tools/test_bench_launch_security.py`; run alongside the full
 `tools/test_strata_bench.py` suite. Attachment via `--url` must not stop an existing
 server. Details: [v0.1.43.1 import record](maintenance/2026-10-13-upstream-v0.1.43.1.md).
 
+### Mac explicit setup/start — `metal/setup_mac.py`
+
+Preserve hardened raw-MTP verification before reusing a prepared Metal MTP artifact,
+shared setup-config carry-over of authentication/allowlist/CORS fields, and explicit
+host/API-key overrides on ordinary starts without implicit build/download work.
+Regression owner: `tools/test_setup_mac_security.py`. Mock fixture results do not
+certify native Mac execution.
+
+### Optional image generation — `serve/images.py`
+
+Retain job-directory cleanup across spawn and log failures; regression owner
+`serve/test_image_cleanup_security.py`. Generated-image URLs are bearer capabilities,
+not API-key-protected downloads; snapshots may persist until restore. Enabling this
+optional feature requires separate policy acceptance. See `FORK_SECURITY.md` and
+[the v0.1.44.1 review](maintenance/2026-10-15-upstream-v0.1.44.1.md).
+
+### Credential-bearing config writes — `setup.py`
+
+`write_config` and `write_setup_config` backups share `private_config_bytes`:
+unpredictable mkstemp, private mode, atomic replacement instead of following
+preexisting destination links, and cleanup on failure. Generated JSON backups and
+temporary files are ignored by Git. Preserve these controls and the original-file
+integrity behavior; test owner `tools/test_setup_config_security.py` alongside
+`tools/test_setup_risk.py`. POSIX mode tests do not certify Windows ACL behavior.
+
 ### Test repairs, not product features
 
 The original patch also adapted obsolete URL-download/pinned-fallback/local-archive expectations in

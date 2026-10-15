@@ -19,6 +19,19 @@ Local file access is not a filesystem sandbox. Only trusted clients should reach
 network access controls when binding beyond loopback; TLS belongs at a suitable trusted proxy. This patch does
 not change a deployed listener, credentials, firewall or systemd service.
 
+## Optional image generation (v0.1.44)
+
+This is separate from image input/vision and is not enabled by a source update.
+Generated-image `response_format: url` URLs are bearer capabilities: possession
+of the random URL permits retrieval without an API key, and no time-based expiry
+is enforced. They are pruned by retention count, not authorization revocation.
+Use base64 responses and avoid this optional feature where that access model is
+unacceptable. Automatic text-session snapshots used by image jobs can remain on
+disk until a later restore; private file modes do not mean immediate deletion.
+Deployment enablement requires a separate policy and resource review. Image job
+temporary directories must be removed on every launch/log failure, not just on a
+successfully spawned process's exit.
+
 ## Explicit integrations can use the network
 
 Configured HTTP MCP servers receive initialization and tool-discovery messages at server startup. Tool calls send
@@ -33,6 +46,13 @@ isolation, use reviewed host/service egress controls. Static source review canno
 subprocesses, GPU drivers, browsers or the whole host as offline.
 
 ## Starts and updates are separate
+
+Generated setup configs and backups can contain API and integration credentials.
+They are written through unpredictable private (0600 on POSIX) temporary files and
+atomically replaced; generated config backups/temporaries are Git-ignored. These
+protections do not remove old readable copies or protect against the same user,
+a compromised checkout, or hostile storage permissions. Native Windows ACL
+qualification remains separate.
 
 An ordinary launcher start of an existing configuration does not automatically update its engine. If hardware
 changes and the engine lacks code for a selected GPU, start refuses rather than downloading/rebuilding it.

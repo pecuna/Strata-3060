@@ -35,6 +35,9 @@ td.log
 /run-*.bat
 /run-*.sh
 /strata-*.json
+/strata-*.json.bak
+/strata-*.json.tmp
+/.strata-config-*.tmp
 /strata-*.log
 /build-strata.bat
 /build-strata-cuda12.bat

@@ -12,6 +12,11 @@ class ForkRoutes(unittest.TestCase):
         self.assertIn("Configured MCP tools can use the network", text)
         self.assertIn("https://github.com/pecuna/Strata-3060", text)
 
+    def test_dynamic_ui_preserves_network_disclosure(self):
+        text = (ROOT / "serve/web/app.js").read_text()
+        self.assertNotIn("Nothing leaves it", text)
+        self.assertIn("Configured MCP tools can use the network", text)
+
     def test_archive_update_hints_target_this_fork(self):
         for name in ("update.sh", "UPDATE.bat"):
             with self.subTest(name=name):
