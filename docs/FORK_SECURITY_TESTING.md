@@ -1,5 +1,9 @@
 # Fork hardening verification
 
+Latest source-import evidence: [2026-10-19 v0.1.45 review](maintenance/2026-10-19-upstream-v0.1.45.md)
+(1,593 Python cases, 15 skipped; three additional GPU-free CPU-native tests).
+This is source qualification only, not a production deployment receipt.
+
 Source scope: security changes on top of `7695859aa13afb248bdb4d36f9b2e95707db079d` in `pecuna/Strata-3060`.
 Execution: Smith's local isolated Python test environment, not the deployed `llm.lan` service.
 This is the historical 2026-10-11 hardening record, not a continuously refreshed test/deployment status.

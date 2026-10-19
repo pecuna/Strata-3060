@@ -154,7 +154,10 @@ can contain credentials: preserve random atomic 0600 creation, private launch
 log directories, refusal of existing log paths/symlinks, and cleanup on launch
 failure or child exit. Never restore predictable ordinary-permission config copies.
 Regression owner: `tools/test_bench_launch_security.py`; run alongside the full
-`tools/test_strata_bench.py` suite. Attachment via `--url` must not stop an existing
+`tools/test_strata_bench.py` suite. Also run `tools/test_bench_main_launch.py` and
+`tools/test_bench_host.py`: helper-only host tests do not exercise main's launch
+and occupied-port paths. Preserve the resolved local port through polling,
+launch and diagnostics. Attachment via `--url` must not stop an existing
 server. Details: [v0.1.43.1 import record](maintenance/2026-10-13-upstream-v0.1.43.1.md).
 
 ### Mac explicit setup/start — `metal/setup_mac.py`
