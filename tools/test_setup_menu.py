@@ -151,7 +151,10 @@ class EnginePlaceholders(unittest.TestCase):
         self.assertEqual(setup.MIN_ENGINE, (0, 1, 45))
         for m in ("UD-Q5_K_XL", "UD-Q6_K_XL", "NVFP4", "NVFP4-NVIDIA"):
             self.assertEqual(setup.MODELS[m]["engine"], (0, 1, 44), m)
-        self.assertIn("0.1.45", (ROOT / "CMakeLists.txt").read_text(encoding="utf-8").split("project(strata VERSION", 1)[1][:12])
+        # This fork deliberately pairs the old installer with a newer native engine.
+        native = tuple(map(int, setup.source_version().split(".")))
+        self.assertGreaterEqual(native, setup.MIN_ENGINE)
+        self.assertEqual(native, (0, 1, 48))
 
 
 class KqLibrary(unittest.TestCase):
