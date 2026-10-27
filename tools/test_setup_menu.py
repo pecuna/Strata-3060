@@ -154,7 +154,7 @@ class EnginePlaceholders(unittest.TestCase):
         # This fork deliberately pairs the old installer with a newer native engine.
         native = tuple(map(int, setup.source_version().split(".")))
         self.assertGreaterEqual(native, setup.MIN_ENGINE)
-        self.assertEqual(native, (0, 1, 48))
+        self.assertEqual(native, (0, 1, 52))
 
 
 class KqLibrary(unittest.TestCase):

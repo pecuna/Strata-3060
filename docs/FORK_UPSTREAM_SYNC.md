@@ -13,6 +13,19 @@ checks performed while preparing this runbook; it is not a future release's veri
 
 ## 1. Historical baseline and scope
 
+### Qwen-native import policy (2026-10-27)
+
+The [engine 0.1.52 record](maintenance/2026-10-27-qwen-engine-0.1.52.md) documents the Qwen-only import from
+upstream app v0.2.7. Do not infer a full app merge from the native version. Preserve the complete native
+source/test/overlay closure and previous fork ancestry; do not replace hardened Python acquisition/runtime code.
+**Keep automatic residency-biased routing off** (`kRoutePriorSmallCard=0`); explicit `STRATA_ROUTE_PRIOR`
+remains an owner-selected quality trade-off. Run `tools.test_fork_engine_defaults` and
+`tools.test_check_isa_guard` plus compiled native tests, not only the Python merge gates. Do not weaken ISA
+object/weak-symbol checks for a new wide kernel. Known inherited native assertions and skipped ISA/ggml
+paths remain failed/unqualified evidence; a source push is not proof of GPU compatibility or performance.
+
+### Original synchronization and hardening
+
 The initial synchronization and hardening were performed on 2026-10-11:
 
 | Object | Exact revision / action |

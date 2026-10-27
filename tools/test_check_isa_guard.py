@@ -28,6 +28,12 @@ class WideInstruction(unittest.TestCase):
 
 
 class Policy(unittest.TestCase):
+    def test_reference_iq_kernel_allowed_only_in_guarded_wide_object(self):
+        name = "strata::kernels::cpu::iq512_reference_gu_rows(int)"
+        self.assertIsNone(G.judge(name, "iq_avx512.cpp.o", "", False, False, True))
+        self.assertIsNotNone(G.judge(name, "native_expert.cpp.o", "", False, False, True))
+        self.assertIsNotNone(G.judge(name, "iq_avx512.cpp.o", "", False, True, True))
+
     def test_kernel_in_an_anonymous_namespace_of_a_wide_file_is_fine(self):
         self.assertIsNone(G.judge("??$gu_rows@$0BA@$00@?A0xa1d599f5@cpu@kernels@strata@@YAXXZ",
                                   "strata_kernels_cpu:iq_avx512.cpp.obj", "", False, False, False))

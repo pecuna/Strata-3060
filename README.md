@@ -18,6 +18,11 @@ and coding agents. Inference runs locally; configured MCP tools and installation
 > installing or updating. This policy takes precedence over inherited upstream and translated instructions.
 > Maintainers: follow [the upstream-sync and reapplication runbook](docs/FORK_UPSTREAM_SYNC.md) for every release
 > import; retain fork fixes and run the required regression checks before publishing.
+>
+> **Native source update:** Qwen engine **0.1.52** from upstream app **v0.2.7** is imported without replacing
+> this fork's hardened app/installer. Residency-biased expert routing remains opt-in. See the
+> [import and qualification record](docs/maintenance/2026-10-27-qwen-engine-0.1.52.md), including inherited
+> native test failures and unverified GPU execution. This is not a binary release or deployment claim.
 
 ## How fast is it?
 
