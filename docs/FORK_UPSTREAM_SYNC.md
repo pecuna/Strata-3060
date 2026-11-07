@@ -1,5 +1,8 @@
 # Maintaining Strata-3060 across upstream releases
 
+Latest native backport: [Qwen engine 0.1.58 / app-source v0.2.12](maintenance/2026-11-07-qwen-engine-0.1.58.md).
+This engine-only source qualification does not itself establish deployment or performance.
+
 This is the repeatable maintenance runbook for `pecuna/Strata-3060`, whose upstream is
 `Niko1221/Strata`. Read it before every upstream synchronization. Bring in reviewed upstream improvements
 **without losing this fork's security behavior**. A successful Git merge is not sufficient verification.

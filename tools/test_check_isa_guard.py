@@ -28,6 +28,14 @@ class WideInstruction(unittest.TestCase):
 
 
 class Policy(unittest.TestCase):
+    def test_0158_kernels_require_exact_wide_object_and_strong_symbol(self):
+        for kernel in ('q50_512_down_rows', 'iq512_fused_gu_rows', 'iq512x_rows'):
+            name = 'strata::kernels::cpu::' + kernel + '(int)'
+            with self.subTest(kernel=kernel):
+                self.assertIsNone(G.judge(name, 'iq_avx512.cpp.o', '', False, False, True))
+                self.assertIsNotNone(G.judge(name, 'native_expert.cpp.o', '', False, False, True))
+                self.assertIsNotNone(G.judge(name, 'iq_avx512.cpp.o', '', False, True, True))
+
     def test_reference_iq_kernel_allowed_only_in_guarded_wide_object(self):
         name = "strata::kernels::cpu::iq512_reference_gu_rows(int)"
         self.assertIsNone(G.judge(name, "iq_avx512.cpp.o", "", False, False, True))

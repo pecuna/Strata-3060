@@ -42,14 +42,14 @@ int main() {
         resolver = text.split("inline float g_route_prior() {", 1)[1].split("inline bool g_qfuse()", 1)[0]
         # Compile the actual production function with its HIP no-device branch.
         # This tests override precedence without substituting a duplicate resolver.
-        source = '#include <cstdlib>\n#include <cstdio>\n#define STRATA_USE_HIP 1\n'
+        source = '#include <cstdlib>\n#include <cstdio>\n#include "strata/core/sm120_series.hpp"\n#define STRATA_USE_HIP 1\n'
         source += "inline float g_route_prior() {" + resolver
         source += '\nint main() { std::printf("%.1f", (double)g_route_prior()); }\n'
         with tempfile.TemporaryDirectory() as folder:
             cpp = Path(folder) / "resolver.cpp"
             cpp.write_text(source)
             exe = Path(folder) / "resolver"
-            built = subprocess.run(["c++", "-std=c++20", str(cpp), "-o", str(exe)], capture_output=True, text=True)
+            built = subprocess.run(["c++", "-std=c++20", "-I", str(ROOT / "include"), str(cpp), "-o", str(exe)], capture_output=True, text=True)
             self.assertEqual(built.returncode, 0, built.stderr)
             for value, expected in ((None, "0.0"), ("0", "0.0"), ("1.5", "1.5")):
                 with self.subTest(value=value):
