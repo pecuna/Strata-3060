@@ -5,7 +5,8 @@
 
 #if defined(STRATA_NATIVE_EXPERTS)
 #include "strata/kernels/cpu/native_expert.hpp"
-#include "ggml.h"
+#include "strata/quant/types.hpp"   // the type ids (Strata's table, no ggml.h)
+#include "strata/platform/commit.hpp"   // #5742: commit_available
 #endif
 
 #include <cuda_runtime.h>
@@ -200,10 +201,10 @@ void test_native_variable_layout() {
 
     NativeFmt first_fmt, second_fmt;
     std::string err;
-    const bool first_ok = native_fmt(GGML_TYPE_IQ3_XXS, GGML_TYPE_IQ4_NL, embedding, feed_forward, first_fmt, err);
+    const bool first_ok = native_fmt((int) strata::quant::Type::IQ3_XXS, (int) strata::quant::Type::IQ4_NL, embedding, feed_forward, first_fmt, err);
     require(first_ok, "IQ3_XXS/IQ4_NL synthetic format is unavailable: " + err);
     err.clear();
-    const bool second_ok = native_fmt(GGML_TYPE_IQ2_XS, GGML_TYPE_IQ4_NL, embedding, feed_forward, second_fmt, err);
+    const bool second_ok = native_fmt((int) strata::quant::Type::IQ2_XS, (int) strata::quant::Type::IQ4_NL, embedding, feed_forward, second_fmt, err);
     require(second_ok, "IQ2_XS/IQ4_NL synthetic format is unavailable: " + err);
     require(first_fmt.bytes != second_fmt.bytes, "chosen native formats do not exercise variable layer sizes");
 
@@ -212,8 +213,8 @@ void test_native_variable_layout() {
     {
         std::ofstream metadata(dir.path / "native_experts.txt");
         require((bool) metadata, "could not create synthetic native_experts.txt");
-        metadata << "0 " << GGML_TYPE_IQ3_XXS << ' ' << GGML_TYPE_IQ4_NL << " 0 " << first_fmt.bytes << '\n';
-        metadata << "1 " << GGML_TYPE_IQ2_XS << ' ' << GGML_TYPE_IQ4_NL << ' ' << layer0_bytes << ' '
+        metadata << "0 " << (int) strata::quant::Type::IQ3_XXS << ' ' << (int) strata::quant::Type::IQ4_NL << " 0 " << first_fmt.bytes << '\n';
+        metadata << "1 " << (int) strata::quant::Type::IQ2_XS << ' ' << (int) strata::quant::Type::IQ4_NL << ' ' << layer0_bytes << ' '
                  << second_fmt.bytes << '\n';
         require((bool) metadata, "could not write synthetic native_experts.txt");
     }
@@ -503,6 +504,15 @@ void test_resident_memory_budget() {
     require(clamp_resident_budget(66 * GiB, 69 * GiB, headroom + margin - 1, headroom) == 0 &&
                 clamp_resident_budget(66 * GiB, 69 * GiB, headroom + margin, headroom) == 0,
             "subtracting the clamping margin underflowed");
+    {
+        // #5742: --resident-budget-gib 24 on 40 GB with a page file at 8 of its 32 GB: 32.25 GiB of RAM and 21.67 GiB of
+        // commit free.  Counting only the commit left cut it to 17.42 GiB; with the page file's 24 GiB of room it stays.
+        const uint64_t phys = 32250ull * GiB / 1000, left = 21670ull * GiB / 1000;
+        require(clamp_resident_budget(24 * GiB, phys, left, headroom) == left - headroom - margin,
+                "the reporter's clamp without the page file's room changed");
+        require(clamp_resident_budget(24 * GiB, phys, strata::platform::commit_available(left, 24 * GiB), headroom) == 24 * GiB,
+                "a budget the page file's room to grow covers was clamped");
+    }
 }
 
 void test_cgroup_memory_budget() {
@@ -651,23 +661,42 @@ void test_host_memory() {
     auto probe = [&](const std::string& self) {
         put("cgroup", self);
         m.commit = 0;
-        const bool ok = host_available_memory(m, mi, cg, root);
+        const bool ok = host_available_memory(m, mi, cg, root, (t.path / "arcstats").string());   // (#5519: the fixture's, never the real one)
         require(m.commit == ~0ull, "Linux memory probe retained a commit limit");
         return ok;
     };
     // no cgroup line at all: MemAvailable alone (before #633: "cannot determine")
     require(probe("") && m.available == 100 * GiB && m.cgroup_limit == ~0ull, "no cgroup: MemAvailable alone");
+    // #5519: a ZFS host: the ARC above its floor (20 GiB of 24, floor 4) is available too; then gone again for the cases below
+    put("arcstats", "name type data\nc_min 4 " + std::to_string(4 * GiB) + "\nsize 4 " + std::to_string(24 * GiB) + "\n");
+    require(probe("") && m.available == 120 * GiB, "ZFS: MemAvailable + the ARC above its floor");
+    fs::remove(t.path / "arcstats");
     // v2, a 48 GiB limit with 16 GiB charged, 4 GiB of it clean cache
     put("fs/cgroup.controllers", "memory\n");
     put("fs/box/memory.max", std::to_string(48 * GiB) + "\n");
     put("fs/box/memory.current", std::to_string(16 * GiB) + "\n");
     put("fs/box/memory.stat", "inactive_file " + std::to_string(4 * GiB) + "\nfile_dirty 0\nfile_writeback 0\n");
     require(probe("0::/box\n") && m.available == 36 * GiB - 48 * GiB / 64 && m.cgroup_limit == 48 * GiB, "v2 limit");
-    // 149: with "file" (active + inactive cache) the active part counts too: 12 GiB of cache, 4 GiB anonymous
-    put("fs/box/memory.stat", "file " + std::to_string(12 * GiB) + "\ninactive_file " + std::to_string(4 * GiB) +
-                              "\nfile_dirty 0\nfile_writeback 0\n");
+    // 149: the active page cache counts too: 12 GiB of cache (8 active, 4 inactive), 4 GiB anonymous
+    put("fs/box/memory.stat", "file " + std::to_string(12 * GiB) + "\nactive_file " + std::to_string(8 * GiB) +
+                              "\ninactive_file " + std::to_string(4 * GiB) + "\nfile_dirty 0\nfile_writeback 0\n");
     require(probe("0::/box\n") && m.available == 44 * GiB - 48 * GiB / 64 && m.cgroup_limit == 48 * GiB,
             "v2 limit, the active page cache credited");
+    // 3 GiB of shmem (a memfd, the KV pool) is in "file" but on the anon lists: it cannot be reclaimed without swap, and an
+    // allocation up to a figure that counted it was OOM-killed in a 24 GiB scope.  Under a container's limit (below
+    // MemTotal) it is not credited; nor are locked pages (the unevictable list)
+    put("fs/box/memory.stat", "file " + std::to_string(15 * GiB) + "\nshmem " + std::to_string(3 * GiB) + "\nactive_file " +
+                              std::to_string(8 * GiB) + "\ninactive_file " + std::to_string(4 * GiB) + "\nunevictable " +
+                              std::to_string(2 * GiB) + "\nfile_dirty 0\nfile_writeback 0\n");
+    put("fs/box/memory.current", std::to_string(19 * GiB) + "\n");
+    require(probe("0::/box\n") && m.available == 41 * GiB - 48 * GiB / 64, "container: shmem and locked pages are not credited");
+    set_env("STRATA_MEM_CREDIT_INACTIVE", "1");
+    require(probe("0::/box\n") && m.available == 44 * GiB - 48 * GiB / 64, "STRATA_MEM_CREDIT_INACTIVE=1: the earlier file credit");
+    set_env("STRATA_MEM_CREDIT_INACTIVE", nullptr);
+    put("meminfo", "MemTotal: 41943040 kB\nMemAvailable: 104857600 kB\n");   // 40 GiB: the 48 GiB limit is not a container's
+    require(probe("0::/box\n") && m.available == 44 * GiB - 48 * GiB / 64, "a limit above MemTotal: the earlier file credit");
+    put("meminfo", "MemTotal: 134217728 kB\nMemAvailable: 104857600 kB\n");
+    put("fs/box/memory.current", std::to_string(16 * GiB) + "\n");
     put("fs/box/memory.stat", "inactive_file " + std::to_string(4 * GiB) + "\nfile_dirty 0\nfile_writeback 0\n");
     put("fs/box/memory.max", "max\n");
     require(probe("0::/box\n") && m.available == 100 * GiB && m.cgroup_limit == ~0ull, "v2 max");

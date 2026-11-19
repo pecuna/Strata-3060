@@ -64,6 +64,30 @@ PleConsts ple_artifact_consts() {
     return c;
 }
 
+bool ple_consts_from_arrays(const std::vector<uint64_t>& mult, const std::vector<uint64_t>& vocab,
+                            const std::vector<uint64_t>& offset, uint64_t table_rows, PleConsts& out, std::string& err) {
+    if (mult.size() != (size_t) NGRAM_SIZE || vocab.size() != (size_t) PLE_N_HEADS || offset.size() != (size_t) PLE_N_HEADS) {
+        err = "the PLE metadata holds " + std::to_string(mult.size()) + " multipliers, " + std::to_string(vocab.size()) +
+              " head sizes and " + std::to_string(offset.size()) + " head offsets; the engine needs " +
+              std::to_string(NGRAM_SIZE) + ", " + std::to_string(PLE_N_HEADS) + " and " + std::to_string(PLE_N_HEADS);
+        return false;
+    }
+    PleConsts c{};
+    for (int i = 0; i < NGRAM_SIZE; ++i) c.mult[i] = mult[i];
+    for (int h = 0; h < PLE_N_HEADS; ++h) {
+        if (vocab[h] == 0) { err = "PLE head " + std::to_string(h) + " has a hash modulus of 0"; return false; }
+        if (table_rows != 0 && (offset[h] > table_rows || vocab[h] > table_rows - offset[h])) {
+            err = "PLE head " + std::to_string(h) + " (offset " + std::to_string(offset[h]) + ", " + std::to_string(vocab[h]) +
+                  " rows) reaches past the table's " + std::to_string(table_rows) + " rows";
+            return false;
+        }
+        c.vocab[h] = vocab[h];
+        c.offset[h] = offset[h];
+    }
+    out = c;
+    return true;
+}
+
 uint64_t ngram_mixed(const int64_t* ctx, const uint64_t* mult, int n) {
     // The first term is an ASSIGNMENT and the rest are XORed into it, which is how the source writes it
     // (`uint64_t mixed = ctx[0]*m[0]; for j=1.. mixed ^= ctx[j]*m[j];`).  Every product wraps mod 2^64,
@@ -208,6 +232,15 @@ const PleFormatInfo* ple_format_for_type(const char* gguf_type_name) {
     for (const PleFormatInfo& f : kPleFormats)
         if (std::strcmp(f.gguf_type, gguf_type_name) == 0) return &f;
     return nullptr;
+}
+bool ple_gguf_table_only(const strata::GgufFile& f) {
+    const MetaValue* v = f.get("general.architecture");
+    if (v != nullptr && v->s == "strata-ple") return true;
+    // #6026 / #6013: a file whose ONLY tensor is the table (a published PLE GGUF with the model's architecture, an
+    // Unsloth engram table without one, a set's table-only shard) holds no projections either.  By content, not by
+    // name or split keys; a file with any other tensor stays a model shard (#5942 kept every --ple-gguf out: too wide)
+    const std::vector<TensorInfo>& ts = f.tensors();
+    return ts.size() == 1 && ts[0].name == "per_layer_token_embd.weight";
 }
 std::string ple_format_list() {
     std::string out;

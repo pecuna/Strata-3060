@@ -16,7 +16,8 @@ BASE = "83ed4f4fab751703e0284ecc75f8cf4ecd4c891c"
 class Engine0157Import(unittest.TestCase):
     def test_native_version_and_qwen_only_guard(self):
         text = (ROOT / "CMakeLists.txt").read_text()
-        self.assertIn("project(strata VERSION 0.1.58 LANGUAGES CXX)", text)
+        # The 0.1.58 native import invariants also apply to the 0.1.62 candidate.
+        self.assertRegex(text, r"project\(strata VERSION 0\.1\.(?:58|62) LANGUAGES CXX\)")
         self.assertIn("This fork imports the Qwen engine only; STRATA_BUILD_DSV41 is unsupported", text)
         self.assertFalse((ROOT / "src/dsv41").exists())
         self.assertFalse((ROOT / "src/split").exists())
@@ -31,6 +32,15 @@ class Engine0157Import(unittest.TestCase):
         for path in paths:
             with self.subTest(path=path):
                 before = subprocess.check_output(["git", "show", f"{BASE}:{path}"], cwd=ROOT)
+                if path == 'setup.py' and 'VERSION 0.1.62 ' in (ROOT / 'CMakeLists.txt').read_text():
+                    # Exact permitted integration delta: fingerprint the new vendored inputs and
+                    # stop passing removed MMQ/vision-ggml options to native builds. Nothing else.
+                    before = before.replace(b'"third_party/ggml-tq")', b'"third_party/ggml-tq", "third_party/strata-ggml")')
+                    before = before.replace(b'"-DSTRATA_PREFILL_MMQ=ON", ', b'')
+                    before = before.replace(b'"-DSTRATA_MMQ_KQUANTS=ON", ', b'')
+                    before = before.replace(b', "-DSTRATA_MMQ_KQUANTS=ON"', b'')
+                    before = before.replace(b'f"-DSTRATA_GGML_DIR={llama}", ', b'')
+                    before = before.replace(b', f"-DSTRATA_GGML_DIR={llama}"', b'')
                 self.assertEqual(hashlib.sha256(before).digest(), hashlib.sha256((ROOT / path).read_bytes()).digest())
 
     @unittest.skipUnless(shutil.which("g++"), "g++ required for native policy gates")

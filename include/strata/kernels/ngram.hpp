@@ -22,20 +22,25 @@
 // All of those are asserted observable in `ple_parity.cpp` rather than trusted.
 #pragma once
 
+#include "strata/core/geometry.hpp"
+
 #include <cstdint>
 #include <string>
+#include <vector>
+
+namespace strata { class GgufFile; }
 
 namespace strata::kernels {
 
 // ---- geometry, every value confirmed against the artifact (docs/gguf-metadata.txt) ----
-inline constexpr int NG_N_EMBD = 2560;          // n_embd
-inline constexpr int PLE_HEAD_DIM = 160;        // qwen4exp.embedding_length_per_layer_input
+inline constexpr int NG_N_EMBD = strata::core::kCompiledGeometry.n_embd;          // n_embd
 inline constexpr int NGRAM_SIZE = 3;            // qwen4exp.ple.ngram_size
 inline constexpr int HEADS_PER_NGRAM = 8;       // qwen4exp.ple.heads_per_ngram
 inline constexpr int PLE_N_HEADS = (NGRAM_SIZE - 1) * HEADS_PER_NGRAM;   // 16
+inline constexpr int PLE_HEAD_DIM = NG_N_EMBD / PLE_N_HEADS;   // 160: qwen4exp.embedding_length_per_layer_input (16 heads make one hidden row)
 inline constexpr int PLE_CONV_KERNEL = 4;       // qwen4exp.ple.conv_kernel
 inline constexpr int32_t PLE_EOS_TOKEN_ID = 248044;
-inline constexpr int NG_HC = 4;                 // hyper_connection.count
+inline constexpr int NG_HC = strata::core::kCompiledGeometry.hc;                 // hyper_connection.count
 inline constexpr int NG_HC_DIM = NG_HC * NG_N_EMBD;                      // 10240
 inline constexpr int NG_HIST = (PLE_CONV_KERNEL - 1) * NGRAM_SIZE;       // 9
 inline constexpr int32_t TOKEN_NULL = -1;       // LLAMA_TOKEN_NULL
@@ -76,6 +81,11 @@ const PleFormatInfo& ple_format_info(PleFormat f);
 const PleFormatInfo* ple_format_for_type(const char* gguf_type_name);
 /// "IQ4_NL, Q5_0 or FP8 (I8)": the formats for an error message, built from the list.
 std::string ple_format_list();
+/// A `--ple-gguf` file that holds the PLE table and no model projections (generate.cpp keeps it out of the native
+/// dense shard list, whose split checks refuse a file of another set): a tools/ple_fp8_pack.py table
+/// (general.architecture = strata-ple), or any file whose only tensor is per_layer_token_embd.weight (a published
+/// PLE GGUF, an Unsloth engram table, a set's table-only shard).  PleTable::open checks the table itself.
+bool ple_gguf_table_only(const strata::GgufFile& f);
 
 /// The artifact's own hash constants, transcribed from `docs/gguf-dump-shard1.txt`:
 ///
@@ -94,6 +104,13 @@ struct PleConsts {
     uint64_t offset[PLE_N_HEADS];
 };
 PleConsts ple_artifact_consts();
+
+/// The hash constants a model file carries in its own metadata (`<arch>.ple.layer_multipliers`, `.head_vocab_sizes`,
+/// `.head_offsets`), checked: NGRAM_SIZE multipliers, PLE_N_HEADS vocabulary sizes (none zero) and offsets, every head's
+/// range [offset, offset + vocab) inside `table_rows` (0 = do not check the table size).  Returns false and sets `err`
+/// when the arrays do not fit; `ple_artifact_consts()` stays the default for a file that carries none.
+bool ple_consts_from_arrays(const std::vector<uint64_t>& mult, const std::vector<uint64_t>& vocab,
+                            const std::vector<uint64_t>& offset, uint64_t table_rows, PleConsts& out, std::string& err);
 
 /// `mixed_n = (ctx[0]*m[0]) ^ (ctx[1]*m[1]) ^ ... ^ (ctx[n-1]*m[n-1])` in uint64.
 ///

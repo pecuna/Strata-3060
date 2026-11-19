@@ -14,6 +14,15 @@ procedure, not an automatic scheduler or a claim that all future upstream change
 The [documentation maintenance record](maintenance/2026-10-11-fork-sync-documentation.md) records fresh
 checks performed while preparing this runbook; it is not a future release's verification receipt.
 
+## Engine 0.1.62 candidate (2026-11-19)
+
+The [isolated 0.1.62 candidate record](maintenance/2026-11-19-qwen-engine-0.1.62-candidate.md)
+describes the native-only import from upstream v0.2.16. Keep the existing application/management layout;
+do not apply upstream's `terminal/` migration to a deployed checkout. The native build uses the vendored
+`third_party/strata-ggml`, independently of the retained vision helper's pinned llama.cpp. Fingerprint
+new vendored native inputs and run the compatibility/security gates before considering deployment.
+A candidate branch or passing CPU build is not GPU qualification or production activation.
+
 ## 1. Historical baseline and scope
 
 ### Qwen-native import policy (2026-10-27)

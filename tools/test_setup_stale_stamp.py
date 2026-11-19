@@ -101,7 +101,8 @@ class BuildEngineStamp(unittest.TestCase):
         setup.build_engine(GPU, "none", True, Path("llama"), toolkit=13)
         self.assertIn("-DSTRATA_Q6K_EXPERTS=ON", self.defs)
         self.assertNotIn("-DSTRATA_Q6K_EXPERTS=OFF", self.defs)
-        self.assertIn("-DSTRATA_MMQ_KQUANTS=ON", self.defs)  # flipped OFF -> ON in the same commit (465cd61d)
+        # 0.1.62 removed llama.cpp MMQ; Q6_K remains explicitly enabled above.
+        self.assertFalse(any(d.startswith('-DSTRATA_MMQ_') for d in self.defs))
 
     def test_a_build_that_leaves_the_old_binary_is_not_stamped_or_installed(self):
         self.built = binary("0.1.42")                     # the build "succeeded" without producing the new engine
