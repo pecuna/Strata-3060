@@ -116,6 +116,8 @@ ALLOWED = {
     "strata::kernels::{anonymous}::gr_up_q8_fast_kernel": {"sm_86": (8, 0)},
     # spill 4 / 4 at 40 registers under __launch_bounds__(THREADS = 256), no local array
     "strata::kernels::{anonymous}::gr_up_v3_kernel": {"sm_120": (8, 0)},
+    # Pinned v0.2.17 SM86 measurement, reproduced on the candidate: 8-byte frame, no local memory.
+    "strata::kernels::{anonymous}::i8_kernel": {"sm_86": (8, 0)},
     # spill 4 / 4 at 48 registers under __launch_bounds__(256), no local array
     "strata::kernels::{anonymous}::native_down_kernel": {"sm_86": (8, 0)},
     # int off[GRP_NC] / float s[GRP_NC] (GRP_NC = 4): per-entry token offsets and partial sums, plus spill 16 / 16

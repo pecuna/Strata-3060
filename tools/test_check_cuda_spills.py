@@ -65,6 +65,14 @@ class Classification(unittest.TestCase):
         self.assertEqual(rc, 1)                            # one allowance lowered: the same object now fails
         self.assertIn("over its allowance STACK 16 LOCAL 0", out)
 
+    def test_sm86_i8_has_only_its_measured_stack_allowance(self):
+        name = 'void strata::kernels::<unnamed>::i8_kernel<(int)23, (bool)1, (int)4, (bool)1, (bool)0>(int*)'
+        for stack, local, expected in ((8, 0, 0), (16, 0, 1), (8, 4, 1)):
+            with self.subTest(stack=stack, local=local):
+                rows = [('iq_kernels.cu.o', 'sm_86', MANGLED, {'STACK': stack, 'LOCAL': local})]
+                rc, out = quiet(CS.check, 'x.a', rows, {MANGLED: name})
+                self.assertEqual(rc, expected, out)
+
     def test_a_vendored_ggml_kernel_is_skipped_and_counted(self):
         rows = [("mmq.cu.o", "sm_86", "_Z9mul_mat_qILi2ELi8EEvPKvS1_PfRiiiiii", {"REG": 128, "STACK": 64})]
         rc, out = quiet(CS.check, "x.a", rows, {rows[0][2]: "void mul_mat_q<2, 8>(void const*, void const*, float*, int&, int, int, int, int, int)"})
