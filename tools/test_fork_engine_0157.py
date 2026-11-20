@@ -16,8 +16,8 @@ BASE = "83ed4f4fab751703e0284ecc75f8cf4ecd4c891c"
 class Engine0157Import(unittest.TestCase):
     def test_native_version_and_qwen_only_guard(self):
         text = (ROOT / "CMakeLists.txt").read_text()
-        # The 0.1.58 native import invariants also apply to the 0.1.62 candidate.
-        self.assertRegex(text, r"project\(strata VERSION 0\.1\.(?:58|62) LANGUAGES CXX\)")
+        # Preserve earlier import invariants on subsequent native candidates.
+        self.assertRegex(text, r"project\(strata VERSION 0\.1\.(?:58|62|63) LANGUAGES CXX\)")
         self.assertIn("This fork imports the Qwen engine only; STRATA_BUILD_DSV41 is unsupported", text)
         self.assertFalse((ROOT / "src/dsv41").exists())
         self.assertFalse((ROOT / "src/split").exists())
@@ -32,7 +32,7 @@ class Engine0157Import(unittest.TestCase):
         for path in paths:
             with self.subTest(path=path):
                 before = subprocess.check_output(["git", "show", f"{BASE}:{path}"], cwd=ROOT)
-                if path == 'setup.py' and 'VERSION 0.1.62 ' in (ROOT / 'CMakeLists.txt').read_text():
+                if path == 'setup.py' and 'VERSION 0.1.58 ' not in (ROOT / 'CMakeLists.txt').read_text():
                     # Exact permitted integration delta: fingerprint the new vendored inputs and
                     # stop passing removed MMQ/vision-ggml options to native builds. Nothing else.
                     before = before.replace(b'"third_party/ggml-tq")', b'"third_party/ggml-tq", "third_party/strata-ggml")')

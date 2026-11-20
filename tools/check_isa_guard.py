@@ -40,7 +40,9 @@ WIDE_PUBLIC = {
     "act_quant_q8_1_avx2", "q8k_quant_avx2", "kq256_gu_rows", "kq256_rows", "bf16_rows_dot_multi",
     "tq_rows_avx512", "q50_512_down_rows", "iq512_fused_gu_rows", "iq512x_rows",  # guarded wide kernels; exact object check below
 }
-WIDE_OBJECTS = ("expert.cpp", "iq_avx512.cpp", "iq_avx2.cpp", "q2_avx2.cpp", "kq_avx2.cpp", "nvfp4_avx512.cpp", "tq_avx512.cpp")
+WIDE_OBJECTS = ("expert.cpp", "iq_avx512.cpp", "iq_avx2.cpp", "q2_avx2.cpp", "kq_avx2.cpp", "kq_avx512.cpp", "nvfp4_avx512.cpp", "tq_avx512.cpp")
+# The KQ512 public entry points are reached only after cpu_avx512_ok().
+KQ512_PUBLIC = {"kq512_rows", "kq512_gu_rows"}
 # Also compiled above the baseline (AVX2/FMA for nvfp4_avx2, AVX for the older CPUs' rows) and reached only behind a CPU
 # check.  STATIC INITIALISERS in any of these run on EVERY CPU at program start (#2324: nvfp4_avx2.cpp / nvfp4_avx512.cpp
 # built a table in a constructor, the compiler used AVX/FMA for it, and a Westmere / Sandy Bridge Xeon died with an
@@ -74,6 +76,10 @@ def judge(name, obj, wide_text, guarded, weak, is_elf):
     object_name = re.split(r"[/\\:]", obj)[-1] if obj is not None else None
     if object_name is not None and not any(object_name in (o + ".obj", o + ".o") for o in WIDE_OBJECTS):
         return "wide-ISA code outside the wide-ISA translation units (object %s)" % obj
+    if object_name in ('kq_avx512.cpp.o', 'kq_avx512.cpp.obj'):
+        if anon or base in KQ512_PUBLIC:
+            return None
+        return "wide-ISA code in an unlisted KQ512 function"
     if anon or base in WIDE_PUBLIC:
         return None
     return "wide-ISA code in an unlisted public function"

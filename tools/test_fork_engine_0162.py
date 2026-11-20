@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class Engine0162Integration(unittest.TestCase):
     def test_engine_version_and_unmoved_service_entrypoints(self):
-        self.assertIn('project(strata VERSION 0.1.62 LANGUAGES CXX)',
-                      (ROOT / 'CMakeLists.txt').read_text())
+        self.assertRegex((ROOT / 'CMakeLists.txt').read_text(),
+                         r'project\(strata VERSION 0\.1\.(?:62|63) LANGUAGES CXX\)')
         for relative in ('setup.py', 'serve/server.py', 'tools/vision/CMakeLists.txt'):
             self.assertTrue((ROOT / relative).is_file(), relative)
         self.assertFalse((ROOT / 'terminal').exists(), 'do not migrate the managed application layout')

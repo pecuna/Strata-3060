@@ -28,6 +28,17 @@ class WideInstruction(unittest.TestCase):
 
 
 class Policy(unittest.TestCase):
+    def test_kq512_entries_require_the_new_exact_object_and_strong_symbols(self):
+        for entry in ('kq512_rows', 'kq512_gu_rows'):
+            name = f'strata::kernels::cpu::{entry}(int)'
+            with self.subTest(entry=entry):
+                self.assertIsNone(G.judge(name, 'kq_avx512.cpp.o', '', False, False, True))
+                self.assertIsNotNone(G.judge(name, 'fake_kq_avx512.cpp.o', '', False, False, True))
+                self.assertIsNotNone(G.judge(name, 'iq_avx512.cpp.o', '', False, False, True))
+                self.assertIsNotNone(G.judge(name, 'kq_avx512.cpp.o', '', False, True, True))
+        self.assertIsNotNone(G.judge('cpu_features()', 'kq_avx512.cpp.o', '', False, False, True))
+        self.assertIn('kq_avx512.cpp', G.INIT_FREE_OBJECTS)
+
     def test_0158_kernels_require_exact_wide_object_and_strong_symbol(self):
         for kernel in ('q50_512_down_rows', 'iq512_fused_gu_rows', 'iq512x_rows'):
             name = 'strata::kernels::cpu::' + kernel + '(int)'
