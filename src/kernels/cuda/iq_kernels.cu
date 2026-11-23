@@ -6067,8 +6067,10 @@ __global__ void __launch_bounds__(256) native_down_lds_kernel(const unsigned lon
     const int e0 = grp_start[g], e1 = grp_start[g + 1];
     const int nrow = (int) L.n_embd;
     const block_q8_1* sh = (const block_q8_1*) sh_raw;
-    constexpr bool kDownSplit = kSplit<TD> || (TD == 7);
-    const bool use_sub8 = kDownSplit && (n_items == 40 || n_items == 20);
+    // Keep the qualified IQ4_NL down reduction: the hoisted/sub-warp variant
+    // changed its reduction path and grew an SM86 stack frame under CUDA 13.3.
+    constexpr bool kHoistDown = TD != 20 && kSplit<TD>;
+    const bool use_sub8 = (kHoistDown || TD == 7) && (n_items == 40 || n_items == 20);
     for (int c0 = e0; c0 < e1; c0 += LDS_NT) {
         const int cn = min(LDS_NT, e1 - c0);
         __syncthreads();
@@ -6138,7 +6140,7 @@ __global__ void __launch_bounds__(256) native_down_lds_kernel(const unsigned lon
                 for (int j = 0; j < NTC; ++j) { s0[j] = 0.0f; s1[j] = 0.0f; }
                 for (int k = lane; k < n_items; k += 32) {
                     const int kbx = k / F::ipb, iqs = F::step * (k % F::ipb);
-                    if constexpr (kSplit<TD>) {
+                    if constexpr (kHoistDown) {
                         const auto rw0 = Split<TD>::load(w0, kbx, iqs);
                         const auto rw1 = Split<TD>::load(w1, kbx, iqs);
 #pragma unroll

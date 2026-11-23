@@ -5,7 +5,8 @@
 - Fork base `cf788a12a21736394275975b7bcbfec1529449f6` on the 0.1.63 quality branch. The installed comparator was built from `3f7e4de792eb99edeb7cd10b044548d38b4e1c87`; the extra base commit adjusts the SM86 guard only.
 - Upstream [app v0.2.19 / engine 0.1.65](https://github.com/Niko1221/Strata/releases/tag/v0.2.19), peeled commit `c6f6427d9de9016fd92d13e29740f65625261df7`. This is deliberately pinned, not an automatic latest-version upgrade.
 - Import the flattened native Qwen delta. Preserve the hardened server, installer and acquisition rules, vision helper, existing production overlays, and `strata.service`. Do not import separate Inkling/HY-4 model runtimes, change the layout, run upstream update, or advance fork `main` for this trial.
-- Source fingerprints: engine `b601714a084be89f`; retained vision `13d9deaf827f14ef`. No newly enabled expert tail skipping; verify the runtime's actual overrides before retention.
+- The pristine import's engine fingerprint was `b601714a084be89f`; recompute the final engine fingerprint from the trial commit. Retained vision fingerprint is `13d9deaf827f14ef`. Expert tail skipping is off. Tail renormalization, bit-plane LM head, and device-hit/plan overrides are not qualified for this trial.
+- The first SM86 artifact had 40 outstanding resource findings against 41 in the exact deployed comparator, including two regressions despite the smaller total: `gr_write_norm_rs_kernel` stack 40→96 bytes and `native_down_lds_kernel<20>` stack 0→8 bytes (both LOCAL 0). Retain the scalar GR prefill reduction and the prior IQ4_NL LDS down dot/reduction; both preserve the comparator's reduction order. Do not increase guard allowances. Rebuild and check the exact new artifact before cutover.
 
 ## Evidence and gates
 
