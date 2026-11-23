@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class QualityEngineTest(unittest.TestCase):
     def test_version(self):
-        self.assertIn('project(strata VERSION 0.1.63 LANGUAGES CXX)', (ROOT / 'CMakeLists.txt').read_text())
+        self.assertIn('project(strata VERSION 0.1.65 LANGUAGES CXX)', (ROOT / 'CMakeLists.txt').read_text())
 
     def test_tail_skip_default_is_off_and_covered_by_native_ctest(self):
         cmake = (ROOT / 'cmake/backends/cpu.cmake').read_text()

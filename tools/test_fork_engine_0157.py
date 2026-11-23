@@ -17,7 +17,7 @@ class Engine0157Import(unittest.TestCase):
     def test_native_version_and_qwen_only_guard(self):
         text = (ROOT / "CMakeLists.txt").read_text()
         # Preserve earlier import invariants on subsequent native candidates.
-        self.assertRegex(text, r"project\(strata VERSION 0\.1\.(?:58|62|63) LANGUAGES CXX\)")
+        self.assertRegex(text, r"project\(strata VERSION 0\.1\.(?:58|62|63|65) LANGUAGES CXX\)")
         self.assertIn("This fork imports the Qwen engine only; STRATA_BUILD_DSV41 is unsupported", text)
         self.assertFalse((ROOT / "src/dsv41").exists())
         self.assertFalse((ROOT / "src/split").exists())

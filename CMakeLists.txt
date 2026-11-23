@@ -10,7 +10,7 @@
 # building for a pre-Ampere arch would produce a binary that runs and is wrong about its own performance, which is
 # the worst of both outcomes.
 cmake_minimum_required(VERSION 3.24)
-project(strata VERSION 0.1.63 LANGUAGES CXX)
+project(strata VERSION 0.1.65 LANGUAGES CXX)
 # Owner fork: Qwen-only native candidate, no application-layout migration.
 if(STRATA_BUILD_DSV41)
   message(FATAL_ERROR "This fork imports the Qwen engine only; STRATA_BUILD_DSV41 is unsupported")
@@ -835,6 +835,11 @@ strata_hip_gfx906_sources()
 option(STRATA_BUILD_SPLIT "Build strata-split: sFNX's split-every-layer engine, host-memory exchange (Linux, CUDA or HIP gfx1201, 2-4 cards)" OFF)
 if(STRATA_BUILD_SPLIT)
   add_subdirectory(src/split)
+endif()
+
+# The standalone Inkling engine is outside this native Qwen import.
+if(STRATA_BUILD_INKLING2)
+  message(FATAL_ERROR "STRATA_BUILD_INKLING2 is unsupported by this Qwen-only candidate")
 endif()
 
 # What this configure registered, so a missing capability is a stated skip (tools/check prints this line too).
